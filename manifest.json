@@ -1,0 +1,21 @@
+[
+    {
+        "guid": "d0a3f1e6-9c2b-4a7d-8e5f-1b2c3d4e5f6a",
+        "name": "AI Search",
+        "description": "Adds an AI search bar to the Jellyfin web client. Ask in natural language and get movies from your own library, personalized to your watch history, backed by a self-hosted AI platform or any OpenAI-compatible endpoint.",
+        "overview": "AI natural-language search & recommendations from your own library.",
+        "owner": "Franciskid",
+        "category": "General",
+        "imageUrl": "",
+        "versions": [
+            {
+                "version": "1.4.0.0",
+                "changelog": "Direct mode now builds a local semantic index (embeddings + in-memory nearest-neighbour search) over any OpenAI-compatible endpoint, so results match by meaning instead of sending a catalog slice. Nightly refresh via a scheduled task. Built against Jellyfin 10.11.0 for 10.11.x compatibility.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.4.0.0/ai-search_1.4.0.0.zip",
+                "checksum": "56d8bba6861ea39e43a695d9c1b0ba0d",
+                "timestamp": "2026-07-03T00:00:00Z"
+            }
+        ]
+    }
+]
