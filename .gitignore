@@ -1,0 +1,9 @@
+# Build output
+dist/
+publish/
+**/bin/
+**/obj/
+
+# OS / editor cruft
+.DS_Store
+*.user
