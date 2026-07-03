@@ -20,20 +20,20 @@ public static class PromptBuilder
     /// <param name="candidates">The movies the model may choose from.</param>
     /// <param name="favorites">Title (year) list of the user's favorites, as a taste signal.</param>
     /// <param name="watched">Title (year) list of watched movies, as a taste signal.</param>
-    /// <param name="includeSynopses">
-    /// Whether to append a short overview per candidate. On for semantic
-    /// retrieval (≤ ~60 rich candidates); off for the legacy catalog dump,
-    /// where hundreds of synopses would explode the token count.
+    /// <param name="includeDetails">
+    /// Whether to append cast and a short overview per candidate. On for
+    /// semantic retrieval (≤ ~60 rich candidates); off for the legacy catalog
+    /// dump, where hundreds of detail lines would explode the token count.
     /// </param>
     /// <returns>The messages array for the completions payload.</returns>
     public static object[] BuildMessages(
         string prompt,
         string locale,
         int maxResults,
-        List<BaseItem> candidates,
+        IReadOnlyList<CandidateMovie> candidates,
         List<string> favorites,
         List<string> watched,
-        bool includeSynopses)
+        bool includeDetails)
     {
         var language = locale == "fr"
             ? "Write the \"answer\" and every \"reason\" in French. "
@@ -41,11 +41,14 @@ public static class PromptBuilder
         var system =
             "You are a film recommendation engine for a personal Jellyfin movie library. " +
             "Recommend ONLY movies from the provided CANDIDATES list, chosen to match the user's request and taste. " +
-            "Never invent titles or indices that are not in the list. Prefer variety and quality. " + language +
+            "Never invent titles or indices that are not in the list. Judge each candidate against the request " +
+            "using ONLY the provided fields (cast, genres, synopsis), not your own memory of the film. " +
+            "Include a movie ONLY if it genuinely satisfies the request; never include one that fails a stated " +
+            "constraint (e.g. an actor, year, or genre the user asked for), and never list a movie just to explain " +
+            "why it was excluded. If only one movie fits, return exactly one; if none fit, return an empty list. " +
+            "When many genuinely fit, return up to " + maxResults + " for variety. " + language +
             "Respond with STRICT minified JSON only (no markdown, no prose) of exactly this shape: " +
-            "{\"answer\":\"one short sentence\",\"recommendations\":[{\"index\":<integer from the list>,\"reason\":\"<=140 chars why it fits\"}]}. " +
-            "Return up to " + maxResults + " recommendations: when several candidates genuinely match, return close to " +
-            "that many rather than only the most obvious ones; return fewer only when the list truly lacks matches.";
+            "{\"answer\":\"one short sentence\",\"recommendations\":[{\"index\":<integer from the list>,\"reason\":\"<=140 chars why it fits\"}]}.";
 
         var user = new StringBuilder();
         user.Append("REQUEST: ").Append(prompt).Append('\n');
@@ -59,12 +62,12 @@ public static class PromptBuilder
             user.Append("USER_WATCHED: ").Append(string.Join("; ", watched)).Append('\n');
         }
 
-        user.Append(includeSynopses
-            ? "CANDIDATES (index|title (year)|genres|synopsis):\n"
+        user.Append(includeDetails
+            ? "CANDIDATES (index|title (year)|genres|cast|synopsis):\n"
             : "CANDIDATES (index|title (year)|genres):\n");
         for (var i = 0; i < candidates.Count; i++)
         {
-            AppendCandidateLine(user, i, candidates[i], includeSynopses);
+            AppendCandidateLine(user, i, candidates[i], includeDetails);
         }
 
         return new object[]
@@ -74,8 +77,9 @@ public static class PromptBuilder
         };
     }
 
-    private static void AppendCandidateLine(StringBuilder user, int index, BaseItem item, bool includeSynopsis)
+    private static void AppendCandidateLine(StringBuilder user, int index, CandidateMovie candidate, bool includeDetails)
     {
+        var item = candidate.Item;
         user.Append(index).Append('|').Append(Clean(item.Name));
         if (item.ProductionYear is > 0)
         {
@@ -87,9 +91,15 @@ public static class PromptBuilder
             user.Append('|').Append(string.Join(',', item.Genres[..System.Math.Min(4, item.Genres.Length)]));
         }
 
-        if (includeSynopsis && !string.IsNullOrWhiteSpace(item.Overview))
+        if (includeDetails)
         {
-            user.Append('|').Append(Snippet(item.Overview));
+            // Cast is the signal that answers people queries; keep the column
+            // even when empty so the pipe positions stay aligned.
+            user.Append('|').Append(Clean(candidate.Cast));
+            if (!string.IsNullOrWhiteSpace(item.Overview))
+            {
+                user.Append('|').Append(Snippet(item.Overview));
+            }
         }
 
         user.Append('\n');

@@ -229,7 +229,15 @@ public class AiSearchController : ControllerBase
         var candidates = await SemanticCandidatesAsync(c, prompt, movies, playedById, cancellationToken).ConfigureAwait(false);
         var usedSemantic = candidates is not null;
         candidates ??= CandidateSelector.Select(pool, c.SelectionStrategy, Math.Max(10, c.MaxCatalogItems));
-        return await RecommendDirect(c, prompt, locale, maxResults, candidates, favorites, watched, usedSemantic, cancellationToken).ConfigureAwait(false);
+
+        // Resolve cast from live metadata only on the semantic path (≤ ~40
+        // candidates); the fallback dump would mean hundreds of people lookups.
+        var enriched = candidates
+            .Select(item => new CandidateMovie(
+                item,
+                usedSemantic ? CastFormatter.Format(_libraryManager.GetPeople(item)) : string.Empty))
+            .ToList();
+        return await RecommendDirect(c, prompt, locale, maxResults, enriched, favorites, watched, usedSemantic, cancellationToken).ConfigureAwait(false);
     }
 
     // --- Direct mode: semantic retrieval over the plugin's own index. ---
@@ -363,16 +371,16 @@ public class AiSearchController : ControllerBase
 
     // --- Direct mode: candidates in, OpenAI-compatible completion out. ---
     private async Task<ActionResult> RecommendDirect(
-        PluginConfiguration c, string prompt, string locale, int maxResults, List<BaseItem> candidates, List<string> favorites, List<string> watched, bool usedSemantic, CancellationToken cancellationToken)
+        PluginConfiguration c, string prompt, string locale, int maxResults, List<CandidateMovie> candidates, List<string> favorites, List<string> watched, bool usedSemantic, CancellationToken cancellationToken)
     {
         if (candidates.Count == 0)
         {
             return Ok(new { answer = "Your movie library looks empty.", model = c.Model, usedProfile = false, results = Array.Empty<object>() });
         }
 
-        // Synopses only with semantic retrieval: ~40 rich lines help the model
-        // judge fit, while hundreds of them would explode the token count.
-        var messages = PromptBuilder.BuildMessages(prompt, locale, maxResults, candidates, favorites, watched, includeSynopses: usedSemantic);
+        // Cast + synopsis only with semantic retrieval: ~40 rich lines help the
+        // model judge fit, while hundreds of them would explode the token count.
+        var messages = PromptBuilder.BuildMessages(prompt, locale, maxResults, candidates, favorites, watched, includeDetails: usedSemantic);
 
         string content;
         try
@@ -408,7 +416,7 @@ public class AiSearchController : ControllerBase
                 continue;
             }
 
-            var item = candidates[rec.Index];
+            var item = candidates[rec.Index].Item;
             results.Add(new
             {
                 itemId = item.Id.ToString("N"),
