@@ -23,6 +23,9 @@ collection.
 
 ---
 
+<img width="1502" height="825" alt="image" src="https://github.com/user-attachments/assets/14dde4ed-9252-47e4-9358-802a783e1584" />
+
+
 ## How it works
 
 1. A small script injected into the Jellyfin web client renders the search bar
@@ -213,8 +216,11 @@ The contract is documented at the bottom of this file.
 - Watch history and favorites are summarized as title lists in the prompt.
   Again, only to the backend you configured yourself.
 - Local models cost nothing. On hosted APIs, a search is a few thousand input
-  tokens (a fraction of a cent on small models), and the index build was a
-  one-time $0.02 for my library.
+  tokens (for 40 movie sent to the model (so with titles, actors, synopsis etc) it
+  goes up to 7000 tokens, which for mistral-medium which i am using equals to about 0.01$,
+  there is probably some optimization to do, and a better model wouldn't need so much
+  info about a movie i guess so that would shrik the payload),
+  and the index build was a one-time $0.02 for my library.
 
 ## Troubleshooting
 
@@ -288,3 +294,12 @@ Any backend implementing this works.
 Developed by [Franciskid](https://github.com/Franciskid).
 
 Licensed under the [GPL-3.0](LICENSE), like most Jellyfin plugins.
+
+
+### Pics
+
+<img width="789" height="558" alt="image" src="https://github.com/user-attachments/assets/7f9eaa93-8973-4506-a705-e51bf76d2e69" />
+
+<img width="796" height="724" alt="image" src="https://github.com/user-attachments/assets/29fdc356-fcf9-424f-bfea-558805ff1472" />
+
+<img width="803" height="713" alt="image" src="https://github.com/user-attachments/assets/dda1c2d6-9489-4511-a001-fc20ab243fcc" />
