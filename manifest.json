@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.4.1.0",
+                "changelog": "People queries now work: the model is given each candidate's cast (actors with characters, plus directors) instead of guessing from memory, and only genuine matches are returned. Built against Jellyfin 10.11.0 for 10.11.x compatibility.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.4.1.0/ai-search_1.4.1.0.zip",
+                "checksum": "33c586914303e0da74d3e24dcad1104b",
+                "timestamp": "2026-07-03T12:00:00Z"
+            },
+            {
                 "version": "1.4.0.0",
                 "changelog": "Direct mode now builds a local semantic index (embeddings + in-memory nearest-neighbour search) over any OpenAI-compatible endpoint, so results match by meaning instead of sending a catalog slice. Nightly refresh via a scheduled task. Built against Jellyfin 10.11.0 for 10.11.x compatibility.",
                 "targetAbi": "10.11.0.0",
