@@ -303,3 +303,6 @@ Licensed under the [GPL-3.0](LICENSE), like most Jellyfin plugins.
 <img width="796" height="724" alt="image" src="https://github.com/user-attachments/assets/29fdc356-fcf9-424f-bfea-558805ff1472" />
 
 <img width="803" height="713" alt="image" src="https://github.com/user-attachments/assets/dda1c2d6-9489-4511-a001-fc20ab243fcc" />
+
+<img width="797" height="608" alt="image" src="https://github.com/user-attachments/assets/8a21057e-62c7-4f72-85fe-98a83450ad7b" />
+
