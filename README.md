@@ -358,11 +358,13 @@ Licensed under the [GPL-3.0](LICENSE), like most Jellyfin plugins.
 
 ### Pics
 
-<img width="789" height="558" alt="image" src="https://github.com/user-attachments/assets/7f9eaa93-8973-4506-a705-e51bf76d2e69" />
+<img width="586" height="672" alt="image" src="https://github.com/user-attachments/assets/169bac75-95a3-4e8d-ba4e-9ad173acea45" />
 
-<img width="796" height="724" alt="image" src="https://github.com/user-attachments/assets/29fdc356-fcf9-424f-bfea-558805ff1472" />
+<img width="597" height="556" alt="image" src="https://github.com/user-attachments/assets/8c5cb127-f120-442f-95d1-819370cf4a8e" />
 
-<img width="803" height="713" alt="image" src="https://github.com/user-attachments/assets/dda1c2d6-9489-4511-a001-fc20ab243fcc" />
+<img width="588" height="698" alt="image" src="https://github.com/user-attachments/assets/61e6c8bf-f703-4ee3-8463-bb19ae8b0de9" />
 
-<img width="797" height="608" alt="image" src="https://github.com/user-attachments/assets/8a21057e-62c7-4f72-85fe-98a83450ad7b" />
+<img width="593" height="538" alt="image" src="https://github.com/user-attachments/assets/a40f3314-88df-497f-8c95-3bcd54b453c7" />
+
+<img width="593" height="682" alt="image" src="https://github.com/user-attachments/assets/60921318-3230-4557-9d31-ec35372b5d58" />
 
