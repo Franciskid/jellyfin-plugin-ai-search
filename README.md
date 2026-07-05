@@ -29,7 +29,8 @@ collection.
 
 ---
 
-<img width="1502" height="825" alt="image" src="https://github.com/user-attachments/assets/14dde4ed-9252-47e4-9358-802a783e1584" />
+
+<img width="1200" height="748" alt="screen_recording_trimmed_under10mb_1200" src="https://github.com/user-attachments/assets/775cbc7b-4718-4350-972d-32b011162715" />
 
 
 ## How it works
