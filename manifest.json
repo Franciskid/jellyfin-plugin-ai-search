@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.5.6.0",
+                "changelog": "The synopsis length sent to the AI for each candidate is now configurable in the plugin settings (0 = send the full synopsis, no cropping) instead of a fixed 180 characters. Search history now remembers the AI's answer line, so reopening a past search shows it again instead of only the raw prompt, and history titles read better.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.5.6.0/ai-search_1.5.6.0.zip",
+                "checksum": "c51a353c94d36e5d31c7bb7b555e587d",
+                "timestamp": "2026-07-05T23:55:00Z"
+            },
+            {
                 "version": "1.5.4.0",
                 "changelog": "Help me choose now hides the recent-searches list while you answer, like a running search. More like this results are now saved into that search's history entry instead of being lost. Episode search is much better: when your query names a series in your library, results are ranked within that series' episodes instead of across the whole library, and the TV retrieval budget was widened.",
                 "targetAbi": "10.11.0.0",
