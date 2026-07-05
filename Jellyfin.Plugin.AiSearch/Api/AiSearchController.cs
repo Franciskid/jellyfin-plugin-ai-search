@@ -636,7 +636,7 @@ public class AiSearchController : ControllerBase
 
             if (record)
             {
-                RecordHistory(userId, historyPrompt, mode, items);
+                RecordHistory(userId, historyPrompt, mode, answer ?? string.Empty, items);
             }
             else
             {
@@ -663,7 +663,7 @@ public class AiSearchController : ControllerBase
 
         // Cast + synopsis only with semantic retrieval: ~40 rich lines help the
         // model judge fit, while hundreds of them would explode the token count.
-        var messages = PromptBuilder.BuildMessages(prompt, locale, maxResults, candidates, favorites, watched, includeDetails: usedSemantic, tasteProfile: tasteProfile);
+        var messages = PromptBuilder.BuildMessages(prompt, locale, maxResults, candidates, favorites, watched, includeDetails: usedSemantic, synopsisLength: c.SynopsisMaxLength, tasteProfile: tasteProfile);
 
         string content;
         try
@@ -715,7 +715,7 @@ public class AiSearchController : ControllerBase
 
         if (record)
         {
-            RecordHistory(userId, historyPrompt, mode, items);
+            RecordHistory(userId, historyPrompt, mode, parsed.Answer ?? string.Empty, items);
         }
         else
         {
@@ -783,6 +783,7 @@ public class AiSearchController : ControllerBase
             id = e.Id,
             at = e.At,
             prompt = e.Prompt,
+            answer = e.Answer,
             mode = e.Mode,
             count = e.Count,
             items = ToResults(e.Items)
@@ -847,7 +848,7 @@ public class AiSearchController : ControllerBase
         }
     }
 
-    private void RecordHistory(Guid userId, string prompt, string mode, List<HistoryItem> items)
+    private void RecordHistory(Guid userId, string prompt, string mode, string answer, List<HistoryItem> items)
     {
         if (userId == Guid.Empty || items.Count == 0)
         {
@@ -861,6 +862,7 @@ public class AiSearchController : ControllerBase
                 Id = Guid.NewGuid().ToString("N"),
                 At = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
                 Prompt = prompt,
+                Answer = answer,
                 Mode = mode,
                 Count = items.Count,
                 Items = items

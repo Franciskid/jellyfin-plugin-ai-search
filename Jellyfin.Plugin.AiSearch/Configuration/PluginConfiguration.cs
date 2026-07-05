@@ -112,6 +112,13 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets the maximum number of recommendations returned.</summary>
     public int MaxResults { get; set; } = 6;
 
+    /// <summary>
+    /// Gets or sets the maximum synopsis length (in characters) sent per
+    /// candidate to the model. A value of 0 or less means no limit — the full
+    /// synopsis is sent uncropped.
+    /// </summary>
+    public int SynopsisMaxLength { get; set; } = 180;
+
     /// <summary>Gets or sets a value indicating whether already-watched movies may be recommended.</summary>
     public bool IncludeWatched { get; set; }
 

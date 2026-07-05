@@ -13,8 +13,6 @@ namespace Jellyfin.Plugin.AiSearch.Recommend;
 /// </summary>
 public static class PromptBuilder
 {
-    private const int SynopsisLength = 180;
-
     /// <summary>Builds the chat messages for an OpenAI-compatible completion call.</summary>
     /// <param name="prompt">The user's request.</param>
     /// <param name="locale">"fr" or "en" — the language for answer and reasons.</param>
@@ -27,6 +25,10 @@ public static class PromptBuilder
     /// semantic retrieval (≤ ~60 rich candidates); off for the legacy catalog
     /// dump, where hundreds of detail lines would explode the token count.
     /// </param>
+    /// <param name="synopsisLength">
+    /// Maximum synopsis length (chars) per candidate. 0 or less means no
+    /// limit — the full synopsis is sent uncropped.
+    /// </param>
     /// <returns>The messages array for the completions payload.</returns>
     public static object[] BuildMessages(
         string prompt,
@@ -36,6 +38,7 @@ public static class PromptBuilder
         List<string> favorites,
         List<string> watched,
         bool includeDetails,
+        int synopsisLength,
         string? tasteProfile = null)
     {
         var language = locale == "fr"
@@ -75,7 +78,7 @@ public static class PromptBuilder
             : "CANDIDATES (index|title (year)|genres):\n");
         for (var i = 0; i < candidates.Count; i++)
         {
-            AppendCandidateLine(user, i, candidates[i], includeDetails);
+            AppendCandidateLine(user, i, candidates[i], includeDetails, synopsisLength);
         }
 
         return new object[]
@@ -151,7 +154,7 @@ public static class PromptBuilder
         };
     }
 
-    private static void AppendCandidateLine(StringBuilder user, int index, CandidateMovie candidate, bool includeDetails)
+    private static void AppendCandidateLine(StringBuilder user, int index, CandidateMovie candidate, bool includeDetails, int synopsisLength)
     {
         var item = candidate.Item;
         if (item is Episode episode)
@@ -180,7 +183,7 @@ public static class PromptBuilder
             user.Append('|').Append(Clean(candidate.Cast));
             if (!string.IsNullOrWhiteSpace(item.Overview))
             {
-                user.Append('|').Append(Snippet(item.Overview));
+                user.Append('|').Append(Snippet(item.Overview, synopsisLength));
             }
         }
 
@@ -191,16 +194,16 @@ public static class PromptBuilder
         value.Replace('|', ' ').Replace('\n', ' ').Replace('\r', ' ').Trim();
 
     /// <summary>Cleaned overview cut at a word boundary, so candidate lines stay compact.</summary>
-    private static string Snippet(string overview)
+    private static string Snippet(string overview, int synopsisLength)
     {
         var cleaned = Clean(overview);
-        if (cleaned.Length <= SynopsisLength)
+        if (synopsisLength <= 0 || cleaned.Length <= synopsisLength)
         {
             return cleaned;
         }
 
-        var cut = cleaned[..SynopsisLength];
+        var cut = cleaned[..synopsisLength];
         var lastSpace = cut.LastIndexOf(' ');
-        return (lastSpace > SynopsisLength * 0.6 ? cut[..lastSpace] : cut) + "…";
+        return (lastSpace > synopsisLength * 0.6 ? cut[..lastSpace] : cut) + "…";
     }
 }

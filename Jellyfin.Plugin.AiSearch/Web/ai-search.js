@@ -149,6 +149,11 @@
         });
     }
 
+    function capFirst(x) {
+        x = (x || '').trim();
+        return x ? x.charAt(0).toUpperCase() + x.slice(1) : x;
+    }
+
     function imageUrl(id) {
         try { return api().getImageUrl(id, { type: 'Primary', maxHeight: 330, quality: 90 }); }
         catch (e) { return ''; }
@@ -812,7 +817,7 @@
                     var img = imageUrl(it.itemId);
                     return img ? '<img loading="lazy" src="' + esc(img) + '" onerror="this.style.visibility=\'hidden\'" />' : '<span class="ph"></span>';
                 }).join('');
-                var label = h.prompt && h.prompt.trim() ? h.prompt : (h.mode === 'surprise' ? s.surprise : s.title);
+                var label = h.prompt && h.prompt.trim() ? capFirst(h.prompt) : (h.mode === 'surprise' ? s.surprise : s.title);
                 var icon = h.mode === 'surprise' ? IC.dice : IC.clock;
                 return '<div class="ais-rowwrap" data-id="' + esc(h.id) + '">' +
                     '<button class="ais-rowdel" data-a="del" title="' + esc(s.deleteEntry) + '" aria-label="' + esc(s.deleteEntry) + '">' + IC.close + '</button>' +
@@ -906,7 +911,8 @@
         showBack(true);
         lastRun = { prompt: h.prompt, server: h.mode === 'surprise' ? 'surprise' : 'normal', collection: false, results: h.items || [] };
         var items = h.items || [];
-        var html = (h.prompt ? '<div class="ais-answer">' + esc(h.prompt) + '</div>' : '') +
+        var head = (h.answer && h.answer.trim()) ? h.answer : h.prompt;
+        var html = (head ? '<div class="ais-answer">' + esc(head) + '</div>' : '') +
             '<div class="ais-grid">' + items.map(cardHtml).join('') + '</div>' +
             '<div class="ais-footer"><button class="ais-ghost" data-a="again">' + IC.sparkle + esc(s.searchAgain) + '</button>' +
             '<button class="ais-ghost" data-a="savetoggle">' + IC.layers + esc(s.saveResults) + '</button></div>';

@@ -135,6 +135,11 @@
                     <input is="emby-input" type="number" id="MaxResults" label="Max results" min="1" max="24" />
                 </div>
 
+                <div class="inputContainer">
+                    <input is="emby-input" type="number" id="SynopsisMaxLength" label="Synopsis characters per candidate (0 = no limit)" min="0" max="5000" />
+                    <div class="fieldDescription">Caps how much of each candidate's synopsis is sent to the model. 0 sends the full synopsis uncropped.</div>
+                </div>
+
                 <div class="checkboxContainer checkboxContainer-withDescription">
                     <label>
                         <input is="emby-checkbox" type="checkbox" id="IncludeWatched" />
@@ -214,6 +219,7 @@
                     page.querySelector('#MaxCatalogItems').value = cfg.MaxCatalogItems;
                     page.querySelector('#SelectionStrategy').value = cfg.SelectionStrategy || 'top';
                     page.querySelector('#MaxResults').value = cfg.MaxResults;
+                    page.querySelector('#SynopsisMaxLength').value = cfg.SynopsisMaxLength;
                     page.querySelector('#IncludeWatched').checked = cfg.IncludeWatched;
                     page.querySelector('#TimeoutSeconds').value = cfg.TimeoutSeconds;
                     applyMode();
@@ -275,6 +281,8 @@
                     cfg.SelectionStrategy = page.querySelector('#SelectionStrategy').value;
                     cfg.Model = page.querySelector('#Model').value;
                     cfg.MaxResults = parseInt(page.querySelector('#MaxResults').value, 10) || 6;
+                    var syn = parseInt(page.querySelector('#SynopsisMaxLength').value, 10);
+                    cfg.SynopsisMaxLength = isNaN(syn) ? 180 : syn;
                     cfg.IncludeWatched = page.querySelector('#IncludeWatched').checked;
                     cfg.TimeoutSeconds = parseInt(page.querySelector('#TimeoutSeconds').value, 10) || 45;
                     ApiClient.updatePluginConfiguration(AiSearchPluginId, cfg).then(function (r) {

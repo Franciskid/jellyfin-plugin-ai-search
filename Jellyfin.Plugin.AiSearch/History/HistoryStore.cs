@@ -36,6 +36,9 @@ public sealed class HistoryEntry
     /// <summary>Gets or sets the natural-language prompt (empty for surprise).</summary>
     public string Prompt { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets the model's one-line answer sentence for this search, shown as the header when the entry is reopened.</summary>
+    public string Answer { get; set; } = string.Empty;
+
     /// <summary>Gets or sets the mode: "normal" or "surprise".</summary>
     public string Mode { get; set; } = "normal";
 
