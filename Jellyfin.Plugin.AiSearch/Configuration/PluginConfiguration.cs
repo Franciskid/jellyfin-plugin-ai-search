@@ -72,6 +72,14 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool SemanticEnabled { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets a value indicating whether TV series and their episodes are
+    /// embedded into the semantic index too, enabling the "TV Shows" search
+    /// scope. Off by default: episode counts can be large (a one-time build that
+    /// can run for hours). Movies are always indexed.
+    /// </summary>
+    public bool IndexTvShows { get; set; }
+
+    /// <summary>
     /// Gets or sets the embedding model id (e.g. "bge-m3" on Ollama,
     /// "text-embedding-3-small" on OpenAI). Empty disables the index.
     /// </summary>

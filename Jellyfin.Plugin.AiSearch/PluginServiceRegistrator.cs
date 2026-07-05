@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.AiSearch.History;
 using Jellyfin.Plugin.AiSearch.Recommend;
 using Jellyfin.Plugin.AiSearch.Search;
 using Jellyfin.Plugin.AiSearch.Web;
@@ -31,5 +32,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
 
         // Direct-mode chat caller.
         serviceCollection.AddSingleton<DirectChatClient>();
+
+        // Per-user search history + taste profile (JSON files under the data folder).
+        serviceCollection.AddSingleton<HistoryStore>();
+        serviceCollection.AddSingleton<TasteProfileStore>();
     }
 }

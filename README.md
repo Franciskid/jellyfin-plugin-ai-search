@@ -6,11 +6,17 @@ Ask your movie library a question, in your own words, and get real answers.
 > *"films about Native Americans"*
 > *"a feel-good movie I haven't seen yet, nothing too long"*
 
-AI Search adds a search bar to the Jellyfin web client. You type what you're in
-the mood for, and it answers with a handful of movies **from your own library**,
-each with a one-line reason why it fits. It knows what you've already watched
-and what you marked as favorite. Click a result and you land on its detail
-page, ready to play.
+AI Search adds a little ✨ button to the Jellyfin web client. Tap it and you get
+three ways in: **Search** (type what you're in the mood for), **Surprise me**
+(let it pick), and **Create collection** (turn a vibe into a saved playlist). It
+answers with a handful of movies **from your own library**, each with a one-line
+reason why it fits. It knows what you've already watched and what you marked as
+favorite. Click a result and you land on its detail page, ready to play.
+
+Not sure what to ask for? Hit **Help me choose** and it interviews you with a few
+quick questions — and if you've already half-typed an idea, those questions adapt
+to it. Every search is kept in a private, per-user **history** you can reopen or
+replay, and any set of results can be saved to a playlist in one tap.
 
 No third party is involved unless you point the plugin at one. Your prompt goes
 from your browser to your Jellyfin server, and from there to whatever AI
@@ -40,6 +46,50 @@ collection.
 4. You get posters, titles, years and reasons.
 
 Step 2 is where most of the work went, so it has its own section below.
+
+## Ways to use it
+
+**Search** is the plain one: type a mood, a vibe, a "like *X* but shorter", and
+get your handful of matches with reasons.
+
+**Surprise me** is for when you can't be bothered to type. Instead of matching a
+query, the plugin hands the model a broad *random* slice of your library (not the
+usual top-rated suspects) and asks it to pull together a delightfully varied,
+unexpected mix — still nudged by your favorites and watch history, so it's random
+in a way that's tuned to *you*, not random noise. Great for rescuing forgotten
+gems you own and never think to search for.
+
+**Create collection** runs a normal search, then offers to save the whole set as
+a Jellyfin playlist. Name it, hit save, and it shows up in your library like any
+other collection. (You can also save the results of *any* search after the fact —
+there's a "Save to playlist" button next to the results.)
+
+**Help me choose** is the fun one. If you click it with the box empty, you get a
+short generic interview — mood, length, seen-it-or-not — and your answers become
+the search. But if you've already typed something, the plugin sends *that* to the
+model first and asks it to write the two or three questions that would actually
+narrow *your* request down. Ask for "something like Whiplash" and it might ask
+about tone, era, and how familiar you want it; ask for "a French thriller" and
+you'll get different questions entirely. You tap through them, and your picks get
+folded back into the final search. It's a small thing that turns a vague itch
+into a precise query without making you do the wording.
+
+**History** keeps your recent searches (per user, stored on the server) with a
+little poster sneak-peek. Reopen one to see its results again, or replay it to
+run it fresh. Clear it any time.
+
+**Movies or TV Shows.** A small switch flips the whole popup between searching
+your movies and searching your series *and individual episodes* — so "the
+episode where they end up in space" is a fair question. TV needs its own index
+(see below); until it's built, TV search still works, just less precisely.
+
+**Two quiet knobs.** A subtle *Personalize* toggle decides whether your taste
+(favorites + watch history) flavors the results, or whether you get a neutral
+search that ignores who you are. And behind the scenes the plugin keeps a short,
+self-updating **taste profile** — the model periodically distills what you seem
+to like from your favorites and history, and feeds that summary into future
+searches so they sharpen as your library and habits evolve. It's never shown or
+sent anywhere but your own AI backend, and the Personalize toggle turns it off.
 
 ## Two modes
 
@@ -193,6 +243,7 @@ The contract is documented at the bottom of this file.
 | Option | What it does |
 |---|---|
 | Use semantic retrieval | The good stuff. Uncheck to always use the fallback instead |
+| Also index TV shows & episodes | Enables the "TV Shows" scope by embedding series + every episode. Off by default — episode counts can be large, so the first build after enabling can run a while. Rebuild the index after changing it |
 | Embedding model | e.g. `bge-m3`. Empty disables the index |
 | Embedding endpoint URL / key | Only when embeddings live somewhere other than the chat endpoint |
 | Query / document prefix | Only for models that demand them (nomic). Leave empty for bge-m3 |
@@ -243,12 +294,20 @@ The contract is documented at the bottom of this file.
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `POST /AiSearch/Recommend` | Jellyfin session | Run a search for the calling user |
+| `POST /AiSearch/Recommend` | Jellyfin session | Run a search (normal or surprise) for the calling user |
+| `POST /AiSearch/Interview` | Jellyfin session | Ask the model for "Help me choose" questions tailored to a prompt |
+| `GET /AiSearch/History` | Jellyfin session | The caller's recent searches |
+| `DELETE /AiSearch/History[/{id}]` | Jellyfin session | Delete one search, or clear all |
+| `POST /AiSearch/Playlist` | Jellyfin session | Save a set of results as a playlist for the caller |
 | `GET /AiSearch/Health` | Jellyfin session | Enabled/configured state for the client script |
 | `GET /AiSearch/Models` | Jellyfin session | Model list proxied from your backend |
 | `GET /AiSearch/IndexStatus` | Admin | Semantic index state (the config page uses this) |
 | `POST /AiSearch/RebuildIndex` | Admin | Kick a background index build |
 | `GET /AiSearch/ClientScript` | none | The injected UI script (contains no secrets) |
+
+`Recommend` also accepts `mode` (`normal`/`surprise`), a per-request
+`includeWatched`, and `excludeItemIds` (used by "More like this" to avoid
+repeats; those follow-up calls aren't recorded in history).
 
 ### Platform mode contract
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -10,10 +11,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.AiSearch.Configuration;
+using Jellyfin.Plugin.AiSearch.History;
 using Jellyfin.Plugin.AiSearch.Recommend;
 using Jellyfin.Plugin.AiSearch.Search;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Playlists;
+using MediaBrowser.Model.Playlists;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -23,7 +28,7 @@ namespace Jellyfin.Plugin.AiSearch.Api;
 /// <summary>Public request body for a recommendation.</summary>
 public class RecommendRequest
 {
-    /// <summary>Gets or sets the natural-language prompt.</summary>
+    /// <summary>Gets or sets the natural-language prompt (optional in surprise mode).</summary>
     public string? Prompt { get; set; }
 
     /// <summary>Gets or sets an optional per-request result cap.</summary>
@@ -31,6 +36,44 @@ public class RecommendRequest
 
     /// <summary>Gets or sets the UI language ("fr" or "en") to answer in.</summary>
     public string? Locale { get; set; }
+
+    /// <summary>Gets or sets the mode: "normal" (default) or "surprise".</summary>
+    public string? Mode { get; set; }
+
+    /// <summary>Gets or sets the search scope: "movies" (default) or "tv".</summary>
+    public string? Scope { get; set; }
+
+    /// <summary>Gets or sets a per-request override for including already-watched movies.</summary>
+    public bool? IncludeWatched { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether to flavor results with the user's taste (favorites,
+    /// watch history, taste profile). Default true; false = a neutral search.
+    /// </summary>
+    public bool? Personalize { get; set; }
+
+    /// <summary>Gets or sets item ids to exclude — used by "show more" to avoid repeats.</summary>
+    public string[]? ExcludeItemIds { get; set; }
+}
+
+/// <summary>Public request body for adaptive "Help me choose" questions.</summary>
+public class InterviewRequest
+{
+    /// <summary>Gets or sets the user's initial request to tailor the questions to.</summary>
+    public string? Prompt { get; set; }
+
+    /// <summary>Gets or sets the UI language ("fr" or "en").</summary>
+    public string? Locale { get; set; }
+}
+
+/// <summary>Public request body to save a set of movies as a per-user playlist.</summary>
+public class PlaylistRequest
+{
+    /// <summary>Gets or sets the playlist name.</summary>
+    public string? Name { get; set; }
+
+    /// <summary>Gets or sets the item ids to add.</summary>
+    public string[]? ItemIds { get; set; }
 }
 
 /// <summary>
@@ -51,6 +94,9 @@ public class AiSearchController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly SemanticRetriever _semanticRetriever;
     private readonly DirectChatClient _directChat;
+    private readonly IPlaylistManager _playlistManager;
+    private readonly HistoryStore _history;
+    private readonly TasteProfileStore _taste;
     private readonly ILogger<AiSearchController> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="AiSearchController"/> class.</summary>
@@ -61,6 +107,9 @@ public class AiSearchController : ControllerBase
         IHttpClientFactory httpClientFactory,
         SemanticRetriever semanticRetriever,
         DirectChatClient directChat,
+        IPlaylistManager playlistManager,
+        HistoryStore history,
+        TasteProfileStore taste,
         ILogger<AiSearchController> logger)
     {
         _userManager = userManager;
@@ -69,8 +118,17 @@ public class AiSearchController : ControllerBase
         _httpClientFactory = httpClientFactory;
         _semanticRetriever = semanticRetriever;
         _directChat = directChat;
+        _playlistManager = playlistManager;
+        _history = history;
+        _taste = taste;
         _logger = logger;
     }
+
+    // Synthetic request for surprise mode — the model still personalizes via the
+    // user's favorites/watched signals, but is steered toward variety.
+    private const string SurprisePrompt =
+        "Surprise me. From the candidates, pick a delightfully varied, unexpected mix I might enjoy " +
+        "but would not think to search for. Favor variety across genres and eras over obvious blockbusters.";
 
     private static PluginConfiguration Config => Plugin.Instance!.Configuration;
 
@@ -153,7 +211,13 @@ public class AiSearchController : ControllerBase
             return StatusCode(503, new { error = "AI search is not configured." });
         }
 
-        if (request is null || string.IsNullOrWhiteSpace(request.Prompt))
+        if (request is null)
+        {
+            return BadRequest(new { error = "Missing request." });
+        }
+
+        var isSurprise = string.Equals(request.Mode, "surprise", StringComparison.OrdinalIgnoreCase);
+        if (!isSurprise && string.IsNullOrWhiteSpace(request.Prompt))
         {
             return BadRequest(new { error = "Missing prompt." });
         }
@@ -172,19 +236,33 @@ public class AiSearchController : ControllerBase
 
         var maxResults = request.MaxResults is > 0 and <= 24 ? request.MaxResults.Value : c.MaxResults;
         var locale = string.Equals(request.Locale, "fr", StringComparison.OrdinalIgnoreCase) ? "fr" : "en";
-        var prompt = request.Prompt!.Trim();
+        var includeWatched = request.IncludeWatched ?? c.IncludeWatched;
+        var personalize = request.Personalize ?? true;
+        var isTv = string.Equals(request.Scope, "tv", StringComparison.OrdinalIgnoreCase);
+        var exclude = ParseGuids(request.ExcludeItemIds);
+
+        // "Show more" pagination sends the already-shown ids; only the first
+        // page of a search is worth recording as a history entry.
+        var record = exclude.Count == 0;
+        var mode = isSurprise ? "surprise" : "normal";
+        var historyPrompt = isSurprise ? string.Empty : request.Prompt!.Trim();
+        var modelPrompt = isSurprise ? SurprisePrompt : historyPrompt;
 
         if (!IsDirect)
         {
-            return await RecommendPlatform(c, prompt, locale, maxResults, user.Username, userId, cancellationToken).ConfigureAwait(false);
+            return await RecommendPlatform(c, modelPrompt, locale, maxResults, user.Username, userId, includeWatched, historyPrompt, mode, record, cancellationToken).ConfigureAwait(false);
         }
 
         // Direct mode: one pass over the user's library view gathers the
         // watch-filtered pool plus taste signals (captures the untyped `user`
         // so we never name the Jellyfin user-entity type across versions).
+        // `movies` holds the scope's items — movies, or TV series + episodes.
+        var scopeKinds = isTv
+            ? new[] { BaseItemKind.Series, BaseItemKind.Episode }
+            : new[] { BaseItemKind.Movie };
         var movies = _libraryManager.GetItemList(new InternalItemsQuery(user)
         {
-            IncludeItemTypes = new[] { BaseItemKind.Movie },
+            IncludeItemTypes = scopeKinds,
             Recursive = true,
             IsVirtualItem = false
         });
@@ -203,17 +281,17 @@ public class AiSearchController : ControllerBase
             var ud = _userDataManager.GetUserData(user, item);
             var played = ud?.Played ?? false;
             playedById.TryAdd(item.Id, played);
-            if ((ud?.IsFavorite ?? false) && favorites.Count < 60)
+            if (personalize && (ud?.IsFavorite ?? false) && favorites.Count < 60)
             {
                 favorites.Add(TitleYear(item));
             }
 
-            if (played && watched.Count < 80)
+            if (personalize && played && watched.Count < 80)
             {
                 watched.Add(TitleYear(item));
             }
 
-            if (c.IncludeWatched || !played)
+            if ((includeWatched || !played) && !exclude.Contains(item.Id))
             {
                 pool.Add(item);
             }
@@ -221,14 +299,26 @@ public class AiSearchController : ControllerBase
 
         if (pool.Count == 0)
         {
-            pool.AddRange(movies.Where(m => !string.IsNullOrWhiteSpace(m.Name)));
+            pool.AddRange(movies.Where(m => !string.IsNullOrWhiteSpace(m.Name) && !exclude.Contains(m.Id)));
         }
 
-        // Prefer the semantic index; fall back to catalog selection when it is
-        // not built/configured or the embedding call fails.
-        var candidates = await SemanticCandidatesAsync(c, prompt, movies, playedById, cancellationToken).ConfigureAwait(false);
-        var usedSemantic = candidates is not null;
-        candidates ??= CandidateSelector.Select(pool, c.SelectionStrategy, Math.Max(10, c.MaxCatalogItems));
+        // Surprise mode skips the semantic index (there is no query to match)
+        // and hands the model a broad random slice to pick delightful picks from.
+        List<BaseItem>? candidates;
+        bool usedSemantic;
+        if (isSurprise)
+        {
+            candidates = CandidateSelector.Select(pool, "random", Math.Max(10, c.MaxCatalogItems));
+            usedSemantic = false;
+        }
+        else
+        {
+            // Prefer the semantic index; fall back to catalog selection when it is
+            // not built/configured or the embedding call fails.
+            candidates = await SemanticCandidatesAsync(c, modelPrompt, movies, playedById, includeWatched, exclude, cancellationToken).ConfigureAwait(false);
+            usedSemantic = candidates is not null;
+            candidates ??= CandidateSelector.Select(pool, c.SelectionStrategy, Math.Max(10, c.MaxCatalogItems));
+        }
 
         // Resolve cast from live metadata only on the semantic path (≤ ~40
         // candidates); the fallback dump would mean hundreds of people lookups.
@@ -237,7 +327,61 @@ public class AiSearchController : ControllerBase
                 item,
                 usedSemantic ? CastFormatter.Format(_libraryManager.GetPeople(item)) : string.Empty))
             .ToList();
-        return await RecommendDirect(c, prompt, locale, maxResults, enriched, favorites, watched, usedSemantic, cancellationToken).ConfigureAwait(false);
+
+        // Distilled taste summary (silent): fed into the prompt when personalizing,
+        // and lazily (re)built in the background as the user's taste drifts.
+        var profileText = personalize ? _taste.Load(userId)?.Text : null;
+        if (personalize)
+        {
+            MaybeRefreshProfile(c, userId, favorites, watched, locale);
+        }
+
+        return await RecommendDirect(c, modelPrompt, locale, maxResults, enriched, favorites, watched, usedSemantic, userId, historyPrompt, mode, record, profileText, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Regenerates the taste profile in the background when it is missing, older
+    // than a week, or the user's favorite/watched signal has drifted enough.
+    private void MaybeRefreshProfile(PluginConfiguration c, Guid userId, List<string> favorites, List<string> watched, string locale)
+    {
+        var signal = favorites.Count + watched.Count;
+        if (signal < 3)
+        {
+            return;
+        }
+
+        var existing = _taste.Load(userId);
+        if (existing is not null
+            && DateTime.TryParse(existing.BuiltAt, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var built)
+            && (DateTime.UtcNow - built).TotalDays < 7
+            && Math.Abs((existing.FavCount + existing.WatchedCount) - signal) < 8)
+        {
+            return;
+        }
+
+        var favs = new List<string>(favorites);
+        var seen = new List<string>(watched);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var messages = PromptBuilder.BuildTasteProfileMessages(favs, seen, locale);
+                var text = CleanProfileText(await _directChat.CompleteAsync(c, messages, CancellationToken.None).ConfigureAwait(false) ?? string.Empty);
+                if (text.Length > 0)
+                {
+                    _taste.Save(userId, new TasteProfile
+                    {
+                        Text = text,
+                        BuiltAt = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                        FavCount = favs.Count,
+                        WatchedCount = seen.Count
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AiSearch: taste profile refresh failed.");
+            }
+        });
     }
 
     // --- Direct mode: semantic retrieval over the plugin's own index. ---
@@ -246,6 +390,8 @@ public class AiSearchController : ControllerBase
         string prompt,
         IReadOnlyList<BaseItem> movies,
         Dictionary<Guid, bool> playedById,
+        bool includeWatched,
+        HashSet<Guid> exclude,
         CancellationToken cancellationToken)
     {
         var maxRetrieve = Math.Clamp(c.MaxRetrieve, 1, 200);
@@ -273,7 +419,12 @@ public class AiSearchController : ControllerBase
                 continue;
             }
 
-            if (!c.IncludeWatched && playedById.TryGetValue(id, out var played) && played)
+            if (exclude.Contains(id))
+            {
+                continue;
+            }
+
+            if (!includeWatched && playedById.TryGetValue(id, out var played) && played)
             {
                 continue;
             }
@@ -290,7 +441,7 @@ public class AiSearchController : ControllerBase
 
     // --- Platform mode: the platform does the semantic search. ---
     private async Task<ActionResult> RecommendPlatform(
-        PluginConfiguration c, string prompt, string locale, int maxResults, string userName, Guid userId, CancellationToken cancellationToken)
+        PluginConfiguration c, string prompt, string locale, int maxResults, string userName, Guid userId, bool includeWatched, string historyPrompt, string mode, bool record, CancellationToken cancellationToken)
     {
         var payload = new
         {
@@ -298,7 +449,7 @@ public class AiSearchController : ControllerBase
             model = string.IsNullOrWhiteSpace(c.Model) ? null : c.Model,
             maxResults,
             maxRetrieve = c.MaxRetrieve,
-            includeWatched = c.IncludeWatched,
+            includeWatched,
             locale,
             user = new { id = userId.ToString("N"), name = userName },
             client = new { name = "jellyfin-ai-search", version = ClientVersion }
@@ -335,7 +486,7 @@ public class AiSearchController : ControllerBase
             var answer = GetString(root, "answer");
             var model = GetString(root, "model") ?? c.Model;
             var usedProfile = root.TryGetProperty("usedProfile", out var up) && up.ValueKind == JsonValueKind.True;
-            var results = new List<object>();
+            var items = new List<HistoryItem>();
             if (root.TryGetProperty("recommendations", out var recs) && recs.ValueKind == JsonValueKind.Array)
             {
                 foreach (var rec in recs.EnumerateArray())
@@ -346,21 +497,26 @@ public class AiSearchController : ControllerBase
                         continue;
                     }
 
-                    results.Add(new
+                    items.Add(new HistoryItem
                     {
-                        itemId,
-                        title = GetString(rec, "title"),
-                        year = rec.TryGetProperty("year", out var y) && y.ValueKind == JsonValueKind.Number ? y.GetInt32() : (int?)null,
-                        reason = GetString(rec, "reason")
+                        ItemId = itemId,
+                        Title = GetString(rec, "title"),
+                        Year = rec.TryGetProperty("year", out var y) && y.ValueKind == JsonValueKind.Number ? y.GetInt32() : (int?)null,
+                        Reason = GetString(rec, "reason")
                     });
-                    if (results.Count >= maxResults)
+                    if (items.Count >= maxResults)
                     {
                         break;
                     }
                 }
             }
 
-            return Ok(new { answer, model, usedProfile, results });
+            if (record)
+            {
+                RecordHistory(userId, historyPrompt, mode, items);
+            }
+
+            return Ok(new { answer, model, usedProfile, results = ToResults(items) });
         }
         catch (Exception ex)
         {
@@ -371,7 +527,7 @@ public class AiSearchController : ControllerBase
 
     // --- Direct mode: candidates in, OpenAI-compatible completion out. ---
     private async Task<ActionResult> RecommendDirect(
-        PluginConfiguration c, string prompt, string locale, int maxResults, List<CandidateMovie> candidates, List<string> favorites, List<string> watched, bool usedSemantic, CancellationToken cancellationToken)
+        PluginConfiguration c, string prompt, string locale, int maxResults, List<CandidateMovie> candidates, List<string> favorites, List<string> watched, bool usedSemantic, Guid userId, string historyPrompt, string mode, bool record, string? tasteProfile, CancellationToken cancellationToken)
     {
         if (candidates.Count == 0)
         {
@@ -380,7 +536,7 @@ public class AiSearchController : ControllerBase
 
         // Cast + synopsis only with semantic retrieval: ~40 rich lines help the
         // model judge fit, while hundreds of them would explode the token count.
-        var messages = PromptBuilder.BuildMessages(prompt, locale, maxResults, candidates, favorites, watched, includeDetails: usedSemantic);
+        var messages = PromptBuilder.BuildMessages(prompt, locale, maxResults, candidates, favorites, watched, includeDetails: usedSemantic, tasteProfile: tasteProfile);
 
         string content;
         try
@@ -408,7 +564,7 @@ public class AiSearchController : ControllerBase
             return StatusCode(502, new { error = "Could not understand the AI response." });
         }
 
-        var results = new List<object>();
+        var items = new List<HistoryItem>();
         foreach (var rec in parsed.Recommendations)
         {
             if (rec.Index < 0 || rec.Index >= candidates.Count)
@@ -417,20 +573,322 @@ public class AiSearchController : ControllerBase
             }
 
             var item = candidates[rec.Index].Item;
-            results.Add(new
+            items.Add(new HistoryItem
             {
-                itemId = item.Id.ToString("N"),
-                title = item.Name,
-                year = item.ProductionYear,
-                reason = rec.Reason
+                ItemId = item.Id.ToString("N"),
+                Title = DisplayTitle(item),
+                Year = item.ProductionYear,
+                Reason = rec.Reason
             });
-            if (results.Count >= maxResults)
+            if (items.Count >= maxResults)
             {
                 break;
             }
         }
 
-        return Ok(new { answer = parsed.Answer, model = c.Model, usedProfile = favorites.Count > 0 || watched.Count > 0, results });
+        if (record)
+        {
+            RecordHistory(userId, historyPrompt, mode, items);
+        }
+
+        var usedProfile = favorites.Count > 0 || watched.Count > 0 || !string.IsNullOrWhiteSpace(tasteProfile);
+        return Ok(new { answer = parsed.Answer, model = c.Model, usedProfile, results = ToResults(items) });
+    }
+
+    /// <summary>
+    /// Returns a few model-generated multiple-choice questions tailored to the
+    /// caller's initial prompt, for the "Help me choose" flow. Degrades to an
+    /// empty list (client falls back to its generic questions) when direct mode
+    /// is off, nothing is configured, no prompt is given, or the model fails.
+    /// </summary>
+    [HttpPost("Interview")]
+    [Authorize(AuthenticationSchemes = "CustomAuthentication")]
+    public async Task<ActionResult> Interview([FromBody] InterviewRequest request, CancellationToken cancellationToken)
+    {
+        var c = Config;
+        if (!c.Enabled || !IsDirect || !Configured(c) || request is null || string.IsNullOrWhiteSpace(request.Prompt))
+        {
+            return Ok(new { questions = Array.Empty<object>() });
+        }
+
+        if (GetUserId() == Guid.Empty)
+        {
+            return Unauthorized();
+        }
+
+        var locale = string.Equals(request.Locale, "fr", StringComparison.OrdinalIgnoreCase) ? "fr" : "en";
+        var messages = PromptBuilder.BuildInterviewMessages(request.Prompt!.Trim(), locale);
+
+        string content;
+        try
+        {
+            content = await _directChat.CompleteAsync(c, messages, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AiSearch: interview generation failed.");
+            return Ok(new { questions = Array.Empty<object>() });
+        }
+
+        return Ok(new { questions = ParseInterview(content) });
+    }
+
+    /// <summary>Returns the authenticated user's recent searches, newest first.</summary>
+    [HttpGet("History")]
+    [Authorize(AuthenticationSchemes = "CustomAuthentication")]
+    public ActionResult History()
+    {
+        var userId = GetUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized();
+        }
+
+        // Project to lowercase-keyed anonymous objects: Jellyfin serializes real
+        // classes as PascalCase, but the web client reads camelCase (h.mode,
+        // it.itemId, …) — matching the Recommend results shape.
+        var entries = _history.Load(userId).Select(e => new
+        {
+            id = e.Id,
+            at = e.At,
+            prompt = e.Prompt,
+            mode = e.Mode,
+            count = e.Count,
+            items = ToResults(e.Items)
+        });
+        return Ok(new { entries });
+    }
+
+    /// <summary>Deletes one history entry, or clears all when no id is given.</summary>
+    [HttpDelete("History")]
+    [HttpDelete("History/{id}")]
+    [Authorize(AuthenticationSchemes = "CustomAuthentication")]
+    public ActionResult DeleteHistory(string? id = null)
+    {
+        var userId = GetUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized();
+        }
+
+        _history.Delete(userId, id);
+        return Ok(new { });
+    }
+
+    /// <summary>Saves a set of movies as a private playlist for the authenticated user.</summary>
+    [HttpPost("Playlist")]
+    [Authorize(AuthenticationSchemes = "CustomAuthentication")]
+    public async Task<ActionResult> Playlist([FromBody] PlaylistRequest request)
+    {
+        var userId = GetUserId();
+        if (userId == Guid.Empty)
+        {
+            return Unauthorized();
+        }
+
+        if (_userManager.GetUserById(userId) is null)
+        {
+            return Unauthorized();
+        }
+
+        var ids = ParseGuids(request?.ItemIds).ToList();
+        if (ids.Count == 0)
+        {
+            return BadRequest(new { error = "No valid items." });
+        }
+
+        var name = string.IsNullOrWhiteSpace(request?.Name) ? "AI collection" : request!.Name!.Trim();
+        try
+        {
+            var result = await _playlistManager.CreatePlaylist(new PlaylistCreationRequest
+            {
+                Name = name,
+                ItemIdList = ids,
+                UserId = userId,
+                MediaType = MediaType.Video
+            }).ConfigureAwait(false);
+            return Ok(new { id = result.Id, name });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AiSearch: could not create playlist.");
+            return StatusCode(502, new { error = "Could not create playlist." });
+        }
+    }
+
+    private void RecordHistory(Guid userId, string prompt, string mode, List<HistoryItem> items)
+    {
+        if (userId == Guid.Empty || items.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            _history.Add(userId, new HistoryEntry
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                At = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                Prompt = prompt,
+                Mode = mode,
+                Count = items.Count,
+                Items = items
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AiSearch: could not record history.");
+        }
+    }
+
+    // Tolerant parse of {"questions":[{"label","options":[...]}]} into camelCase
+    // anonymous objects, capped to keep the UI compact. Options may arrive as
+    // plain strings or as {value/label} objects; both are flattened to strings.
+    private static object[] ParseInterview(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return Array.Empty<object>();
+        }
+
+        var text = content.Trim();
+        if (text.StartsWith("```", StringComparison.Ordinal))
+        {
+            var nl = text.IndexOf('\n');
+            if (nl >= 0)
+            {
+                text = text[(nl + 1)..];
+            }
+
+            if (text.EndsWith("```", StringComparison.Ordinal))
+            {
+                text = text[..^3];
+            }
+        }
+
+        var start = text.IndexOf('{');
+        var end = text.LastIndexOf('}');
+        if (start < 0 || end <= start)
+        {
+            return Array.Empty<object>();
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(text.Substring(start, end - start + 1));
+            if (!doc.RootElement.TryGetProperty("questions", out var qs) || qs.ValueKind != JsonValueKind.Array)
+            {
+                return Array.Empty<object>();
+            }
+
+            var questions = new List<object>();
+            foreach (var q in qs.EnumerateArray())
+            {
+                var label = GetString(q, "label")?.Trim();
+                if (string.IsNullOrEmpty(label) || !q.TryGetProperty("options", out var opts) || opts.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+
+                var options = new List<string>();
+                foreach (var opt in opts.EnumerateArray())
+                {
+                    var value = opt.ValueKind == JsonValueKind.String ? opt.GetString() : GetString(opt, "label") ?? GetString(opt, "value");
+                    value = value?.Trim();
+                    if (!string.IsNullOrEmpty(value) && !options.Contains(value))
+                    {
+                        options.Add(value);
+                    }
+
+                    if (options.Count >= 5)
+                    {
+                        break;
+                    }
+                }
+
+                if (options.Count >= 2)
+                {
+                    questions.Add(new { label, options });
+                }
+
+                if (questions.Count >= 3)
+                {
+                    break;
+                }
+            }
+
+            return questions.ToArray();
+        }
+        catch (JsonException)
+        {
+            return Array.Empty<object>();
+        }
+    }
+
+    // Models often wrap a "plain text" answer in JSON or code fences despite
+    // instructions; unwrap {"summary": "..."} and strip fences so the stored
+    // profile is clean prose.
+    private static string CleanProfileText(string raw)
+    {
+        var text = raw.Trim();
+        if (text.StartsWith("```", StringComparison.Ordinal))
+        {
+            var nl = text.IndexOf('\n');
+            if (nl >= 0)
+            {
+                text = text[(nl + 1)..];
+            }
+
+            if (text.EndsWith("```", StringComparison.Ordinal))
+            {
+                text = text[..^3];
+            }
+
+            text = text.Trim();
+        }
+
+        if (text.StartsWith("{", StringComparison.Ordinal))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(text);
+                foreach (var key in new[] { "summary", "profile", "text", "taste" })
+                {
+                    if (doc.RootElement.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String)
+                    {
+                        return v.GetString()!.Trim();
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                // Not JSON after all — fall through and use the raw text.
+            }
+        }
+
+        return text;
+    }
+
+    private static object[] ToResults(List<HistoryItem> items) =>
+        items.Select(i => (object)new { itemId = i.ItemId, title = i.Title, year = i.Year, reason = i.Reason }).ToArray();
+
+    private static HashSet<Guid> ParseGuids(string[]? ids)
+    {
+        var set = new HashSet<Guid>();
+        if (ids is null)
+        {
+            return set;
+        }
+
+        foreach (var id in ids)
+        {
+            if (Guid.TryParse(id, out var g))
+            {
+                set.Add(g);
+            }
+        }
+
+        return set;
     }
 
     private Guid GetUserId()
@@ -454,6 +912,10 @@ public class AiSearchController : ControllerBase
 
     private static string TitleYear(BaseItem item) =>
         item.ProductionYear is > 0 ? item.Name + " (" + item.ProductionYear + ")" : item.Name;
+
+    // Episodes read better as "Series — S02E05 — Title" than a bare episode name.
+    private static string? DisplayTitle(BaseItem item) =>
+        item is Episode episode ? DocumentBuilder.EpisodeLabel(episode) : item.Name;
 
     private static string Trunc(string s, int n) => s.Length <= n ? s : s.Substring(0, n);
 }

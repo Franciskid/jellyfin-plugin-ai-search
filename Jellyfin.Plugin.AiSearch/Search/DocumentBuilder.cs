@@ -5,14 +5,16 @@ using System.Security.Cryptography;
 using System.Text;
 using Jellyfin.Data.Enums;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 
 namespace Jellyfin.Plugin.AiSearch.Search;
 
 /// <summary>
-/// Turns a movie into the text that gets embedded: title, genres, tags,
-/// director + lead cast, and the overview — so thematic queries ("films about
-/// Native Americans") have material to match beyond the title.
+/// Turns a movie, series, or episode into the text that gets embedded: title,
+/// genres, tags, director + lead cast, and the overview — so thematic queries
+/// ("films about Native Americans", "the episode where they go to space") have
+/// material to match beyond the title.
 /// </summary>
 public class DocumentBuilder
 {
@@ -28,14 +30,21 @@ public class DocumentBuilder
         _libraryManager = libraryManager;
     }
 
-    /// <summary>Builds the embeddable text for one movie.</summary>
-    /// <param name="item">The movie.</param>
-    /// <returns>A single paragraph describing the movie.</returns>
+    /// <summary>Builds the embeddable text for one movie, series, or episode.</summary>
+    /// <param name="item">The item.</param>
+    /// <returns>A single paragraph describing the item.</returns>
     public string BuildText(BaseItem item)
     {
+        if (item is Episode episode)
+        {
+            return BuildEpisodeText(episode);
+        }
+
         var parts = new List<string>
         {
-            item.ProductionYear is > 0 ? $"{item.Name} ({item.ProductionYear})" : item.Name,
+            item is Series
+                ? (item.ProductionYear is > 0 ? $"TV series: {item.Name} ({item.ProductionYear})" : $"TV series: {item.Name}")
+                : (item.ProductionYear is > 0 ? $"{item.Name} ({item.ProductionYear})" : item.Name),
         };
 
         if (item.Genres is { Length: > 0 })
@@ -57,6 +66,43 @@ public class DocumentBuilder
         if (!string.IsNullOrWhiteSpace(item.Overview))
         {
             parts.Add(item.Overview);
+        }
+
+        return string.Join(" ", parts);
+    }
+
+    /// <summary>A human label for an episode: "Series — S02E05 — Title".</summary>
+    /// <param name="episode">The episode.</param>
+    /// <returns>The display label.</returns>
+    public static string EpisodeLabel(Episode episode)
+    {
+        var code = episode.ParentIndexNumber is int s && episode.IndexNumber is int e
+            ? $"S{s:D2}E{e:D2}"
+            : null;
+        var series = string.IsNullOrWhiteSpace(episode.SeriesName) ? null : episode.SeriesName;
+        var title = string.IsNullOrWhiteSpace(episode.Name) ? null : episode.Name;
+        return string.Join(" — ", new[] { series, code, title }.Where(p => p is not null));
+    }
+
+    private string BuildEpisodeText(Episode episode)
+    {
+        var parts = new List<string> { "TV episode: " + EpisodeLabel(episode) + "." };
+
+        var genres = episode.Genres is { Length: > 0 } ? episode.Genres : episode.Series?.Genres;
+        if (genres is { Length: > 0 })
+        {
+            parts.Add("Genres: " + string.Join(", ", genres) + ".");
+        }
+
+        var people = People(episode);
+        if (people.Count > 0)
+        {
+            parts.Add("Cast: " + string.Join(", ", people) + ".");
+        }
+
+        if (!string.IsNullOrWhiteSpace(episode.Overview))
+        {
+            parts.Add(episode.Overview);
         }
 
         return string.Join(" ", parts);

@@ -114,28 +114,31 @@ public class IndexBuilder
         IProgress<double>? progress,
         CancellationToken cancellationToken)
     {
-        var movies = _libraryManager.GetItemList(new InternalItemsQuery
+        var kinds = Plugin.Instance!.Configuration.IndexTvShows
+            ? new[] { BaseItemKind.Movie, BaseItemKind.Series, BaseItemKind.Episode }
+            : new[] { BaseItemKind.Movie };
+        var items = _libraryManager.GetItemList(new InternalItemsQuery
         {
-            IncludeItemTypes = new[] { BaseItemKind.Movie },
+            IncludeItemTypes = kinds,
             Recursive = true,
             IsVirtualItem = false,
         }).Where(item => !string.IsNullOrWhiteSpace(item.Name)).ToList();
 
         // Reuse vectors whose document (and model/prefix) did not change.
         var previous = ReusableEntries(target.Model);
-        var entries = new List<IndexEntry>(movies.Count);
+        var entries = new List<IndexEntry>(items.Count);
         var pending = new List<(BaseItem Item, string Hash, string Text)>();
-        foreach (var movie in movies)
+        foreach (var item in items)
         {
-            var text = _documents.BuildText(movie);
+            var text = _documents.BuildText(item);
             var hash = DocumentBuilder.ContentHash(text, target.Model, documentPrefix);
-            if (previous.TryGetValue(movie.Id, out var entry) && string.Equals(entry.ContentHash, hash, StringComparison.Ordinal))
+            if (previous.TryGetValue(item.Id, out var entry) && string.Equals(entry.ContentHash, hash, StringComparison.Ordinal))
             {
                 entries.Add(entry);
             }
             else
             {
-                pending.Add((movie, hash, documentPrefix + text));
+                pending.Add((item, hash, documentPrefix + text));
             }
         }
 

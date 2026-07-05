@@ -7,3 +7,6 @@ publish/
 # OS / editor cruft
 .DS_Store
 *.user
+
+# Local tooling
+.claude/

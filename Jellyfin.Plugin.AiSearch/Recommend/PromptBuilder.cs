@@ -1,6 +1,8 @@
 using System.Collections.Generic;
 using System.Text;
+using Jellyfin.Plugin.AiSearch.Search;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.TV;
 
 namespace Jellyfin.Plugin.AiSearch.Recommend;
 
@@ -33,7 +35,8 @@ public static class PromptBuilder
         IReadOnlyList<CandidateMovie> candidates,
         List<string> favorites,
         List<string> watched,
-        bool includeDetails)
+        bool includeDetails,
+        string? tasteProfile = null)
     {
         var language = locale == "fr"
             ? "Write the \"answer\" and every \"reason\" in French. "
@@ -52,6 +55,11 @@ public static class PromptBuilder
 
         var user = new StringBuilder();
         user.Append("REQUEST: ").Append(prompt).Append('\n');
+        if (!string.IsNullOrWhiteSpace(tasteProfile))
+        {
+            user.Append("USER_TASTE_PROFILE: ").Append(tasteProfile.Trim()).Append('\n');
+        }
+
         if (favorites.Count > 0)
         {
             user.Append("USER_FAVORITES: ").Append(string.Join("; ", favorites)).Append('\n');
@@ -77,13 +85,87 @@ public static class PromptBuilder
         };
     }
 
+    /// <summary>
+    /// Builds the messages that ask the model to propose a few short
+    /// multiple-choice questions tailored to the user's initial request, so the
+    /// "Help me choose" flow can refine a vague prompt instead of asking the
+    /// generic mood/time/seen questions.
+    /// </summary>
+    /// <param name="prompt">The user's initial request.</param>
+    /// <param name="locale">"fr" or "en" — the language for the questions.</param>
+    /// <returns>The messages array for the completions payload.</returns>
+    public static object[] BuildInterviewMessages(string prompt, string locale)
+    {
+        var language = locale == "fr" ? "French" : "English";
+        var system =
+            "You help a user refine a movie search of their personal library. " +
+            "Given their initial request, produce 2 or 3 short multiple-choice questions whose answers would most " +
+            "help narrow down a great recommendation. Ask ONLY about dimensions the request leaves open (for example " +
+            "tone, era, pace, length, language, or how familiar they want it) — never re-ask something the request " +
+            "already states. Each question must have between 2 and 5 concise options (a few words each). " +
+            "Write every question and option in " + language + ". " +
+            "Respond with STRICT minified JSON only (no markdown, no prose) of exactly this shape: " +
+            "{\"questions\":[{\"label\":\"<the question>\",\"options\":[\"<option>\",\"<option>\"]}]}.";
+
+        return new object[]
+        {
+            new { role = "system", content = system },
+            new { role = "user", content = "INITIAL REQUEST: " + prompt },
+        };
+    }
+
+    /// <summary>
+    /// Builds the messages that ask the model to distill a viewer's taste into a
+    /// short profile from their favorites and most-watched titles. Kept silent
+    /// server-side and fed back into future searches.
+    /// </summary>
+    /// <param name="favorites">Title (year) list of favorites.</param>
+    /// <param name="watched">Title (year) list of watched titles.</param>
+    /// <param name="locale">"fr" or "en" — the language for the summary.</param>
+    /// <returns>The messages array for the completions payload.</returns>
+    public static object[] BuildTasteProfileMessages(List<string> favorites, List<string> watched, string locale)
+    {
+        var language = locale == "fr" ? "French" : "English";
+        var system =
+            "You profile a film & TV viewer's taste for a recommendation engine. " +
+            "From their favorites and most-watched titles, write 2 to 4 sentences capturing what they seem to enjoy: " +
+            "genres, tones, eras, pacing, languages, and any directors or themes that recur. Be specific and concrete, " +
+            "not generic. Do not list the titles back; describe the taste behind them. Write in " + language + ". " +
+            "Output ONLY the summary as plain prose — no JSON, no quotes, no field names, no code fences, no preamble.";
+
+        var user = new StringBuilder();
+        if (favorites.Count > 0)
+        {
+            user.Append("FAVORITES: ").Append(string.Join("; ", favorites)).Append('\n');
+        }
+
+        if (watched.Count > 0)
+        {
+            user.Append("WATCHED: ").Append(string.Join("; ", watched)).Append('\n');
+        }
+
+        return new object[]
+        {
+            new { role = "system", content = system },
+            new { role = "user", content = user.ToString() },
+        };
+    }
+
     private static void AppendCandidateLine(StringBuilder user, int index, CandidateMovie candidate, bool includeDetails)
     {
         var item = candidate.Item;
-        user.Append(index).Append('|').Append(Clean(item.Name));
-        if (item.ProductionYear is > 0)
+        if (item is Episode episode)
         {
-            user.Append(" (").Append(item.ProductionYear).Append(')');
+            // Episodes already carry series + SxxExx + title in their label.
+            user.Append(index).Append('|').Append(Clean(DocumentBuilder.EpisodeLabel(episode)));
+        }
+        else
+        {
+            user.Append(index).Append('|').Append(Clean(item.Name));
+            if (item.ProductionYear is > 0)
+            {
+                user.Append(" (").Append(item.ProductionYear).Append(')');
+            }
         }
 
         if (item.Genres is { Length: > 0 })

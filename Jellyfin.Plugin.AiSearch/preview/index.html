@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Search preview</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0e13;color:#8b95a3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .bg{position:fixed;inset:0;background:
+     radial-gradient(1200px 600px at 20% -10%, rgba(0,164,220,.10), transparent 60%),
+     radial-gradient(1000px 500px at 90% 10%, rgba(111,91,255,.10), transparent 60%),
+     #0b0e13;}
+  .hint{position:fixed;left:20px;top:16px;font-size:13px;opacity:.5}
+  .demo-bar{position:fixed;left:20px;top:44px;display:flex;gap:8px;flex-wrap:wrap}
+  .demo-bar button{background:#161c24;color:#c7ced6;border:1px solid #263042;border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<div class="hint">AI Search — local preview harness (mocked ApiClient)</div>
+<div class="demo-bar">
+  <button onclick="aisState('home')">Home</button>
+  <button onclick="aisState('search')">Search input</button>
+  <button onclick="aisState('interview')">Help (adaptive)</button>
+  <button onclick="aisState('interview-generic')">Help (generic)</button>
+  <button onclick="aisState('loading')">Loading</button>
+  <button onclick="aisState('results')">Results</button>
+  <button onclick="aisState('collection')">Collection results</button>
+</div>
+
+<script>
+// ------- mock movie data -------
+var TITLES = [
+  ['Wind River', 2017, 'Cold, procedural tension.'],
+  ['Prisoners', 2013, 'Slow-burn dread and moral weight.'],
+  ['Nightcrawler', 2014, 'Nervy, nocturnal, relentless.'],
+  ['Hell or High Water', 2016, 'Lean modern-western crime.'],
+  ['No Country for Old Men', 2007, 'Quiet, merciless suspense.'],
+  ['The Departed', 2006, 'Twisty cat-and-mouse crime.'],
+  ['Drive', 2011, 'Neon, spare, sudden violence.'],
+  ['Uncut Gems', 2019, 'Anxiety cranked to eleven.']
+];
+function hash(s){var h=0;for(var i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))>>>0;}return h;}
+function poster(id){
+  var h=hash(id), hue=h%360;
+  var svg='<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300"><rect width="200" height="300" fill="hsl('+hue+',16%,15%)"/><g opacity=".16" fill="none" stroke="#fff" stroke-width="2.4"><rect x="36" y="92" width="128" height="116" rx="10"/><circle cx="100" cy="150" r="24"/></g><path d="M93 139l22 11-22 11z" fill="#fff" opacity=".28"/></svg>';
+  return 'data:image/svg+xml;utf8,'+encodeURIComponent(svg);
+}
+function item(i){return {itemId:'id'+i, title:TITLES[i][0], year:TITLES[i][1], reason:TITLES[i][2]};}
+function results(n){return TITLES.slice(0,n||6).map(function(t,i){return {itemId:'id'+i, title:t[0], year:t[1], reason:t[2]};});}
+
+var HIST=[
+  {id:'h1', at:new Date(Date.now()-3*3600e3).toISOString(), prompt:'brutal westerns, nothing too old', mode:'normal', count:6, items:[item(3),item(4),item(0),item(6)]},
+  {id:'h2', at:new Date(Date.now()-26*3600e3).toISOString(), prompt:'something like Whiplash', mode:'normal', count:5, items:[item(2),item(7),item(1),item(5)]},
+  {id:'h3', at:new Date(Date.now()-3*24*3600e3).toISOString(), prompt:'', mode:'surprise', count:4, items:[item(6),item(3),item(5),item(0)]}
+];
+
+window.ApiClient = {
+  accessToken:function(){return 'tok';},
+  serverId:function(){return 's1';},
+  getUrl:function(p){return '/api/'+p;},
+  getImageUrl:function(id){return poster(id);},
+  ajax:function(opts){
+    var url=opts.url, type=(opts.type||'GET').toUpperCase();
+    var delay = /Recommend/.test(url) ? 2600 : 150;
+    return new Promise(function(res){
+      setTimeout(function(){
+        if(/AiSearch\/Health/.test(url)) return res({enabled:true,configured:true,mode:'direct',model:'mistral-medium',maxResults:10});
+        if(/AiSearch\/Interview/.test(url)){ return res({questions:[
+          {label:'How dark do you want it?', options:['Bleak and grim','Tense but not bleak','A bit of levity']},
+          {label:'Era?', options:['Recent (2010s+)','Modern classics','No preference']},
+          {label:'Pace?', options:['Slow-burn','Steadily building','Relentless']}
+        ]}); }
+        if(/AiSearch\/History/.test(url)){ if(type==='DELETE'){HIST=[];return res({});} return res({entries:HIST}); }
+        if(/AiSearch\/Recommend/.test(url)){ var b={};try{b=JSON.parse(opts.data||'{}');}catch(e){} return res({answer: b.mode==='surprise'?'A wildcard you probably forgot you owned:':'Six tense, tightly-wound thrillers from your library.', model:'mistral-medium', usedProfile:true, results:results(6)}); }
+        if(/AiSearch\/Playlist/.test(url)) return res({id:'pl1', name:'AI collection'});
+        res({});
+      }, delay);
+    });
+  }
+};
+
+// ------- demo driver: force a given popup state for screenshots -------
+function q(sel){return document.querySelector(sel);}
+function click(sel){var e=q(sel);if(e)e.click();}
+function aisState(name){
+  // close then reopen fresh
+  var ov=q('.ais-overlay'); if(ov){ q('.ais-close').click(); }
+  setTimeout(function(){
+    click('.ais-fab');
+    setTimeout(function(){
+      if(name==='home') return;
+      if(name==='search'){ click('.ais-pill[data-a="search"]'); }
+      if(name==='interview'){ click('.ais-pill[data-a="search"]'); setTimeout(function(){var i=q('.ais-input');if(i){i.value='something like Whiplash';} click('.ais-help');},120); }
+      if(name==='interview-generic'){ click('.ais-pill[data-a="search"]'); setTimeout(function(){click('.ais-help');},120); }
+      if(name==='collection'){ click('.ais-pill[data-a="collection"]'); setTimeout(function(){var i=q('.ais-input');if(i){i.value='rainy sunday afternoon';} click('.ais-submit');},120); }
+      if(name==='loading'){ click('.ais-pill[data-a="search"]'); setTimeout(function(){var i=q('.ais-input');if(i){i.value='tense and short, like Sicario';} click('.ais-submit');},120); }
+      if(name==='results'){ click('.ais-pill[data-a="search"]'); setTimeout(function(){var i=q('.ais-input');if(i){i.value='tense and short, like Sicario';} click('.ais-submit');},120); }
+    },140);
+  }, ov?260:0);
+}
+
+// auto-open home once the FAB appears
+var tries=0;
+var iv=setInterval(function(){tries++;if(q('.ais-fab')){clearInterval(iv);click('.ais-fab');}else if(tries>40){clearInterval(iv);}},200);
+</script>
+<script>document.write('<scr' + 'ipt src="ai-search.js?v=' + Date.now() + '"></scr' + 'ipt>');</script>
+</body>
+</html>

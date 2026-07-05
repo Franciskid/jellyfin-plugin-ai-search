@@ -68,6 +68,17 @@
                             <span>Use semantic retrieval (recommended)</span>
                         </label>
                     </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label>
+                            <input is="emby-checkbox" type="checkbox" id="IndexTvShows" />
+                            <span>Also index TV shows &amp; episodes</span>
+                        </label>
+                        <div class="fieldDescription">
+                            Enables the "TV Shows" search scope by embedding your series and every
+                            episode too. Episode counts can be large, so the first build after enabling
+                            this may run for a while. Rebuild the index after changing it.
+                        </div>
+                    </div>
                     <div class="inputContainer">
                         <input is="emby-input" type="text" id="EmbeddingModel" label="Embedding model" />
                         <div class="fieldDescription">e.g. bge-m3 (Ollama, multilingual) or text-embedding-3-small (OpenAI). Empty disables the index.</div>
@@ -192,6 +203,7 @@
                     page.querySelector('#DirectEndpointUrl').value = cfg.DirectEndpointUrl || '';
                     page.querySelector('#DirectApiKey').value = cfg.DirectApiKey || '';
                     page.querySelector('#SemanticEnabled').checked = cfg.SemanticEnabled !== false;
+                    page.querySelector('#IndexTvShows').checked = cfg.IndexTvShows === true;
                     page.querySelector('#EmbeddingModel').value = cfg.EmbeddingModel || '';
                     page.querySelector('#EmbeddingEndpointUrl').value = cfg.EmbeddingEndpointUrl || '';
                     page.querySelector('#EmbeddingApiKey').value = cfg.EmbeddingApiKey || '';
@@ -251,6 +263,7 @@
                     cfg.DirectEndpointUrl = page.querySelector('#DirectEndpointUrl').value.trim();
                     cfg.DirectApiKey = page.querySelector('#DirectApiKey').value.trim();
                     cfg.SemanticEnabled = page.querySelector('#SemanticEnabled').checked;
+                    cfg.IndexTvShows = page.querySelector('#IndexTvShows').checked;
                     cfg.EmbeddingModel = page.querySelector('#EmbeddingModel').value.trim();
                     cfg.EmbeddingEndpointUrl = page.querySelector('#EmbeddingEndpointUrl').value.trim();
                     cfg.EmbeddingApiKey = page.querySelector('#EmbeddingApiKey').value.trim();
