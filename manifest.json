@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.5.2.0",
+                "changelog": "History rows can now be deleted individually: a subtle cross fades in on hover (desktop) or is revealed by swiping (mobile), with a full swipe deleting immediately. Surprise me now morphs into a full-width button revealing Movies/TV Shows and Personalize to my taste toggles before running, instead of firing immediately.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.5.2.0/ai-search_1.5.2.0.zip",
+                "checksum": "3d0b919ab4adef92d01a48cad78a1b2e",
+                "timestamp": "2026-07-05T20:00:00Z"
+            },
+            {
                 "version": "1.5.1.0",
                 "changelog": "Fix: model list dropdown could come back empty even after saving the endpoint URL/key. The Models endpoint now normalizes different provider response shapes (bare array, {data:[...]}, {models:[...]}) and surfaces the real HTTP error in the config page instead of silently showing 'No models returned'.",
                 "targetAbi": "10.11.0.0",

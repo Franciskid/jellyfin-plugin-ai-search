@@ -52,6 +52,7 @@
             personalize: 'Personalize to my taste',
             scopeMovies: 'Movies',
             scopeTv: 'TV Shows',
+            deleteEntry: 'Delete',
             q1: 'What kind of night is it?',
             q1opts: [['easy', 'Easy'], ['intense', 'Intense'], ['beautiful', 'Beautiful'], ['funny', 'Funny'], ['dark', 'Dark']],
             q2: 'How much time?',
@@ -96,6 +97,7 @@
             personalize: 'Selon mes goûts',
             scopeMovies: 'Films',
             scopeTv: 'Séries',
+            deleteEntry: 'Supprimer',
             q1: 'Quelle soirée ?',
             q1opts: [['easy', 'Détente'], ['intense', 'Intense'], ['beautiful', 'Beau'], ['funny', 'Drôle'], ['dark', 'Sombre']],
             q2: 'Combien de temps ?',
@@ -262,7 +264,7 @@
     '.ais-actions{display:flex;gap:8px}' +
     '.ais-pill{flex:1;min-width:0;height:42px;border:1px solid rgba(255,255,255,.13);background:transparent;' +
       'color:#cbd0d6;font-size:13.5px;font-weight:500;letter-spacing:-.01em;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;' +
-      'transition:background .14s,border-color .14s,color .14s}' +
+      'transition:background .14s,border-color .14s,color .14s,flex-grow .3s ease,flex-basis .3s ease,opacity .22s ease,padding .22s ease,margin .22s ease}' +
     '.ais-pill:hover{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.22);color:#eef1f4}' +
     '.ais-pill:active{background:rgba(255,255,255,.08)}' +
     '.ais-pill .ais-ic{width:17px;height:17px;opacity:.72}' +
@@ -270,6 +272,11 @@
     '.ais-pill.primary:hover{background:#0fb0e8;border-color:#0fb0e8;color:#fff}' +
     '.ais-pill.primary .ais-ic{opacity:1}' +
     '.ais-pill .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.ais-actions.exp .ais-pill:not([data-a="surprise"]){flex-grow:0;flex-basis:0;max-width:0;opacity:0;padding:0;margin:0;border-color:transparent;pointer-events:none;overflow:hidden}' +
+    '.ais-actions.exp .ais-pill[data-a="surprise"]{flex-grow:1}' +
+    '.ais-surprisebar{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-top:0;padding-top:0;' +
+      'max-height:0;opacity:0;overflow:hidden;transition:max-height .26s ease,opacity .2s ease,margin-top .26s ease,padding-top .26s ease}' +
+    '.ais-surprisebar.show{max-height:80px;opacity:1;margin-top:11px;padding-top:11px;border-top:1px solid rgba(255,255,255,.08)}' +
 
     '.ais-inputwrap{display:flex;align-items:center;gap:8px;min-height:44px;padding:5px 5px 5px 14px;background:transparent;' +
       'border:1px solid rgba(255,255,255,.16);transform-origin:left center;animation:ais-expand .22s ease-out}' +
@@ -309,6 +316,16 @@
     '.ais-row + .ais-row{border-top:1px solid rgba(255,255,255,.07)}' +
     '.ais-row:hover{background:rgba(255,255,255,.045)}' +
     '.ais-row:hover .ais-chev{color:#9098a2;transform:translateX(2px)}' +
+    '.ais-rowwrap{position:relative;overflow:hidden;background:#15171b}' +
+    '.ais-rowwrap + .ais-rowwrap{border-top:1px solid rgba(255,255,255,.07)}' +
+    '.ais-rowwrap .ais-row{position:relative;z-index:1;background:#15171b;transition:transform .22s ease,background .13s;touch-action:pan-x pan-y}' +
+    '.ais-rowwrap .ais-row + .ais-row{border-top:none}' +
+    '.ais-rowdel{position:absolute;top:0;left:0;bottom:0;width:30px;border:none;background:transparent;color:#565c66;' +
+      'display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .16s,color .13s;z-index:2}' +
+    '.ais-rowdel .ais-ic{width:13px;height:13px}' +
+    '.ais-rowdel:hover{color:#f08a8a}' +
+    '@media (hover:hover){.ais-rowwrap:hover .ais-rowdel{opacity:1;pointer-events:auto}' +
+      '.ais-rowwrap:hover .ais-row{transform:translateX(28px)}}' +
     '.ais-thumbs{display:flex;flex:none}' +
     '.ais-thumbs img,.ais-thumbs .ph{width:25px;height:37px;object-fit:cover;background:#20242b;' +
       'box-shadow:0 0 0 1px rgba(0,0,0,.6);margin-left:-13px}' +
@@ -422,7 +439,9 @@
             btn.addEventListener('click', function () {
                 prefs.scope = btn.getAttribute('data-scope');
                 writeStr('aisScope', prefs.scope);
-                root.querySelectorAll('.ais-segbtn').forEach(function (b) { b.classList.toggle('sel', b === btn); });
+                root.querySelectorAll('.ais-segbtn').forEach(function (b) {
+                    b.classList.toggle('sel', b.getAttribute('data-scope') === prefs.scope);
+                });
             });
         });
     }
@@ -495,16 +514,34 @@
     function setActions() {
         var s = t();
         els.composer.innerHTML =
-            '<div class="ais-scopebar">' + scopeHtml() + '</div>' +
-            '<div class="ais-actions ais-anim-actions">' +
+            '<div class="ais-actions ais-anim-actions" id="aisActions">' +
             '<button class="ais-pill primary" data-a="search">' + IC.sparkle + '<span class="lbl">' + esc(s.search) + '</span></button>' +
             '<button class="ais-pill" data-a="surprise">' + IC.dice + '<span class="lbl">' + esc(s.surprise) + '</span></button>' +
             '<button class="ais-pill" data-a="collection">' + IC.layers + '<span class="lbl">' + esc(s.collection) + '</span></button>' +
+            '</div>' +
+            '<div class="ais-surprisebar" id="aisSurprisePrefs">' +
+            scopeHtml() + toggleHtml('personalize', s.personalize, prefs.personalize) +
             '</div>';
+
+        var actionsEl = els.composer.querySelector('#aisActions');
+        var prefsBar = els.composer.querySelector('#aisSurprisePrefs');
         wireScope(els.composer);
+        wireToggle(els.composer, 'personalize', function (on) { prefs.personalize = on; writePref('aisPersonalize', on); });
+
+        var expanded = false;
+        function expand() {
+            expanded = true;
+            showBack(true);
+            actionsEl.classList.add('exp');
+            requestAnimationFrame(function () { prefsBar.classList.add('show'); });
+        }
+
         els.composer.querySelector('[data-a="search"]').addEventListener('click', function () { setInput(false); });
-        els.composer.querySelector('[data-a="surprise"]').addEventListener('click', doSurprise);
         els.composer.querySelector('[data-a="collection"]').addEventListener('click', function () { setInput(true); });
+        els.composer.querySelector('[data-a="surprise"]').addEventListener('click', function () {
+            if (!expanded) { expand(); return; }
+            doSurprise();
+        });
     }
 
     // Grows the textarea with its content up to two lines, then it scrolls.
@@ -775,20 +812,88 @@
                 }).join('');
                 var label = h.prompt && h.prompt.trim() ? h.prompt : (h.mode === 'surprise' ? s.surprise : s.title);
                 var icon = h.mode === 'surprise' ? IC.dice : IC.clock;
-                return '<div class="ais-row" data-id="' + esc(h.id) + '">' +
+                return '<div class="ais-rowwrap" data-id="' + esc(h.id) + '">' +
+                    '<button class="ais-rowdel" data-a="del" title="' + esc(s.deleteEntry) + '" aria-label="' + esc(s.deleteEntry) + '">' + IC.close + '</button>' +
+                    '<div class="ais-row">' +
                     '<div class="ais-thumbs">' + thumbs + '</div>' +
                     '<div class="ais-rowtxt"><div class="ais-rowq">' + esc(label) + '</div>' +
                     '<div class="ais-rowmeta">' + icon + '<span>' + esc(s.movies(h.count || (h.items || []).length)) + ' · ' + esc(relTime(h.at)) + '</span></div></div>' +
                     '<span class="ais-chev">' + IC.chev + '</span>' +
+                    '</div>' +
                     '</div>';
             }).join('');
             els.content.innerHTML = '<div><div class="ais-sectlbl">' + esc(s.recent) + '</div><div class="ais-list">' + rows + '</div>' +
                 '<div class="ais-footer" style="justify-content:flex-end;padding-top:6px"><button class="ais-clear" data-a="clear">' + esc(s.clear) + '</button></div></div>';
-            els.content.querySelectorAll('.ais-row').forEach(function (row) {
-                row.addEventListener('click', function () { openHistory(row.getAttribute('data-id')); });
+            els.content.querySelectorAll('.ais-rowwrap').forEach(function (wrap) {
+                wireHistoryRow(wrap);
             });
             var clr = els.content.querySelector('[data-a="clear"]');
             if (clr) { clr.addEventListener('click', function () { deleteHistory(null).then(renderHistory); }); }
+        });
+    }
+
+    // Removes one history entry from the DOM (collapse animation) and server,
+    // falling back to a full re-render if the list becomes empty.
+    function removeHistoryRow(wrap) {
+        var id = wrap.getAttribute('data-id');
+        historyCache = historyCache.filter(function (x) { return x.id !== id; });
+        deleteHistory(id);
+        wrap.style.transition = 'max-height .2s ease, opacity .2s ease';
+        wrap.style.maxHeight = wrap.offsetHeight + 'px';
+        requestAnimationFrame(function () {
+            wrap.style.maxHeight = '0px';
+            wrap.style.opacity = '0';
+        });
+        setTimeout(function () {
+            if (wrap.parentNode) { wrap.parentNode.removeChild(wrap); }
+            if (!els.content.querySelector('.ais-rowwrap')) { renderHistory(); }
+        }, 210);
+    }
+
+    // Wires per-row deletion: a hover-revealed button on desktop (see the
+    // `hover:hover` media query in CSS), and swipe-to-delete on touch, where
+    // partial swipe reveals the same button and a fast/full swipe deletes
+    // immediately.
+    function wireHistoryRow(wrap) {
+        var row = wrap.querySelector('.ais-row');
+        var delBtn = wrap.querySelector('[data-a="del"]');
+        var OPEN = 28, THRESH = 70;
+        var startX = null, startY = null, dx = 0, axis = null, open = false;
+
+        delBtn.addEventListener('click', function (e) { e.stopPropagation(); removeHistoryRow(wrap); });
+
+        function setX(x, animate) {
+            row.style.transition = animate ? 'transform .2s ease' : 'none';
+            row.style.transform = 'translateX(' + x + 'px)';
+        }
+
+        row.addEventListener('touchstart', function (e) {
+            var p = e.touches[0];
+            startX = p.clientX; startY = p.clientY; dx = 0; axis = null;
+        }, { passive: true });
+
+        row.addEventListener('touchmove', function (e) {
+            if (startX === null) { return; }
+            var p = e.touches[0];
+            var ddx = p.clientX - startX, ddy = p.clientY - startY;
+            if (axis === null) { axis = Math.abs(ddx) > Math.abs(ddy) ? 'x' : 'y'; }
+            if (axis !== 'x') { return; }
+            e.preventDefault();
+            dx = Math.max(0, Math.min(96, ddx + (open ? OPEN : 0)));
+            setX(dx, false);
+        }, { passive: false });
+
+        row.addEventListener('touchend', function () {
+            startX = null;
+            if (axis !== 'x') { return; }
+            if (dx > THRESH) { setX(row.offsetWidth, true); row.style.opacity = '0'; removeHistoryRow(wrap); return; }
+            open = dx > 26;
+            setX(open ? OPEN : 0, true);
+        });
+
+        row.addEventListener('click', function (e) {
+            if (open) { e.stopPropagation(); open = false; setX(0, true); return; }
+            openHistory(wrap.getAttribute('data-id'));
         });
     }
 
