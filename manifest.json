@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.5.7.0",
+                "changelog": "The 'Reload models' button on the settings page now refreshes reliably: it shows a loading state, disables while fetching, and bypasses browser caching so newly available models always appear instead of a stale list.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.5.7.0/ai-search_1.5.7.0.zip",
+                "checksum": "e1eac4f0b336805514949e4e63c8e341",
+                "timestamp": "2026-07-06T00:20:00Z"
+            },
+            {
                 "version": "1.5.6.0",
                 "changelog": "The synopsis length sent to the AI for each candidate is now configurable in the plugin settings (0 = send the full synopsis, no cropping) instead of a fixed 180 characters. Search history now remembers the AI's answer line, so reopening a past search shows it again instead of only the raw prompt, and history titles read better.",
                 "targetAbi": "10.11.0.0",
