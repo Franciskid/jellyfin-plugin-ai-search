@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.5.1.0",
+                "changelog": "Fix: model list dropdown could come back empty even after saving the endpoint URL/key. The Models endpoint now normalizes different provider response shapes (bare array, {data:[...]}, {models:[...]}) and surfaces the real HTTP error in the config page instead of silently showing 'No models returned'.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.5.1.0/ai-search_1.5.1.0.zip",
+                "checksum": "9961df5220a92901fb4318ea1ed27653",
+                "timestamp": "2026-07-05T18:41:00Z"
+            },
+            {
                 "version": "1.4.1.0",
                 "changelog": "People queries now work: the model is given each candidate's cast (actors with characters, plus directors) instead of guessing from memory, and only genuine matches are returned. Built against Jellyfin 10.11.0 for 10.11.x compatibility.",
                 "targetAbi": "10.11.0.0",

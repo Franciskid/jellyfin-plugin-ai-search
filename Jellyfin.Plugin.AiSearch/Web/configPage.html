@@ -175,7 +175,9 @@
                 ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('AiSearch/Models'), dataType: 'json' }).then(function (res) {
                     var list = (res && res.data) ? res.data : [];
                     if (!list.length) {
-                        hint.textContent = 'No models returned. Save the URL/key, then Reload models.';
+                        hint.textContent = res && res.error
+                            ? 'No models returned: ' + res.error
+                            : 'No models returned. Save the URL/key, then Reload models.';
                         if (selected) { sel.innerHTML = '<option value="' + selected + '">' + selected + '</option>'; sel.value = selected; }
                         return;
                     }

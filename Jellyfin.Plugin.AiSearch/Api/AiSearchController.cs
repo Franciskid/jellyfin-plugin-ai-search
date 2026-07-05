@@ -186,7 +186,14 @@ public class AiSearchController : ControllerBase
             using var client = CreateClient(c, key);
             using var resp = await client.GetAsync(Combine(baseUrl, path), cancellationToken).ConfigureAwait(false);
             var body = await resp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            return Content(body, "application/json");
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("AiSearch: models endpoint returned {Status}: {Body}", resp.StatusCode, body);
+                return Ok(new { data = Array.Empty<object>(), error = $"{(int)resp.StatusCode} {resp.StatusCode}: {body}" });
+            }
+
+            var ids = ExtractModelIds(body);
+            return Ok(new { data = ids.Select(id => new { id }) });
         }
         catch (Exception ex)
         {
@@ -194,6 +201,56 @@ public class AiSearchController : ControllerBase
             return Ok(new { data = Array.Empty<object>(), error = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Normalizes the various shapes providers use for a models listing
+    /// (OpenAI's {data:[{id}]}, a bare array, or Ollama-style {models:[{name|model}]})
+    /// into a flat list of model id strings.
+    /// </summary>
+    private static List<string> ExtractModelIds(string body)
+    {
+        var ids = new List<string>();
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        var items = root.ValueKind switch
+        {
+            JsonValueKind.Array => root,
+            JsonValueKind.Object when root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array => data,
+            JsonValueKind.Object when root.TryGetProperty("models", out var models) && models.ValueKind == JsonValueKind.Array => models,
+            _ => default
+        };
+
+        if (items.ValueKind != JsonValueKind.Array)
+        {
+            return ids;
+        }
+
+        foreach (var item in items.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String)
+            {
+                ids.Add(item.GetString()!);
+                continue;
+            }
+
+            if (item.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var id = TryGetString(item, "id") ?? TryGetString(item, "name") ?? TryGetString(item, "model");
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
+    }
+
+    private static string? TryGetString(JsonElement obj, string prop) =>
+        obj.TryGetProperty(prop, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     /// <summary>Returns AI-chosen library recommendations for the authenticated user's prompt.</summary>
     [HttpPost("Recommend")]
