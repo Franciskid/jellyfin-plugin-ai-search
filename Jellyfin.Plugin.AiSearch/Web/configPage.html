@@ -177,13 +177,17 @@
             function loadModels(selected) {
                 var sel = page.querySelector('#Model');
                 var hint = page.querySelector('#ModelHint');
-                ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('AiSearch/Models'), dataType: 'json' }).then(function (res) {
+                var btn = page.querySelector('#ReloadModels');
+                if (btn) { btn.disabled = true; }
+                hint.textContent = 'Loading models…';
+                ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('AiSearch/Models', { _: new Date().getTime() }), dataType: 'json' }).then(function (res) {
                     var list = (res && res.data) ? res.data : [];
                     if (!list.length) {
                         hint.textContent = res && res.error
                             ? 'No models returned: ' + res.error
                             : 'No models returned. Save the URL/key, then Reload models.';
                         if (selected) { sel.innerHTML = '<option value="' + selected + '">' + selected + '</option>'; sel.value = selected; }
+                        if (btn) { btn.disabled = false; }
                         return;
                     }
                     sel.innerHTML = list.map(function (m) {
@@ -193,9 +197,11 @@
                     if (selected) { sel.value = selected; }
                     if (!sel.value && list.length) { sel.value = (list[0].id || list[0]); }
                     hint.textContent = list.length + ' models available.';
+                    if (btn) { btn.disabled = false; }
                 }).catch(function () {
                     hint.textContent = 'Could not load models (save the URL/key first, then Reload models).';
                     if (selected) { sel.innerHTML = '<option value="' + selected + '">' + selected + '</option>'; sel.value = selected; }
+                    if (btn) { btn.disabled = false; }
                 });
             }
 

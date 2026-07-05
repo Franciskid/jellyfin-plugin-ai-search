@@ -173,6 +173,7 @@ public class AiSearchController : ControllerBase
     public async Task<ActionResult> Models(CancellationToken cancellationToken)
     {
         var c = Config;
+        Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
         if (!Configured(c))
         {
             return Ok(new { data = Array.Empty<object>() });
