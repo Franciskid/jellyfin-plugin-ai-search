@@ -361,11 +361,19 @@ public class AiSearchController : ControllerBase
 
         // Surprise mode skips the semantic index (there is no query to match)
         // and hands the model a broad random slice to pick delightful picks from.
+        // For TV scope, restrict to series — surprising the user with a single
+        // episode rather than a show to watch isn't the point of the feature.
         List<BaseItem>? candidates;
         bool usedSemantic;
         if (isSurprise)
         {
-            candidates = CandidateSelector.Select(pool, "random", Math.Max(10, c.MaxCatalogItems));
+            var surprisePool = isTv ? pool.Where(item => item is Series).ToList() : pool;
+            if (isTv && surprisePool.Count == 0)
+            {
+                surprisePool = movies.Where(item => item is Series && !exclude.Contains(item.Id)).ToList();
+            }
+
+            candidates = CandidateSelector.Select(surprisePool, "random", Math.Max(10, c.MaxCatalogItems));
             usedSemantic = false;
         }
         else
