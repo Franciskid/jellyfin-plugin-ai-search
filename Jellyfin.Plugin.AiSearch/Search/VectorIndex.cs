@@ -37,8 +37,12 @@ public class VectorIndex
     /// <summary>Returns the <paramref name="take"/> most similar items, best first.</summary>
     /// <param name="normalizedQuery">The unit-length query vector.</param>
     /// <param name="take">How many hits to return.</param>
+    /// <param name="allowedIds">
+    /// Optional filter: when non-null and non-empty, only entries whose item id is
+    /// in this set are scored — used to scope a query to a single series' episodes.
+    /// </param>
     /// <returns>Item ids with their cosine similarity, descending.</returns>
-    public IReadOnlyList<(Guid ItemId, float Score)> Search(float[] normalizedQuery, int take)
+    public IReadOnlyList<(Guid ItemId, float Score)> Search(float[] normalizedQuery, int take, HashSet<Guid>? allowedIds = null)
     {
         var snapshot = _current;
         if (snapshot is null || snapshot.Dimensions != normalizedQuery.Length || snapshot.Entries.Count == 0)
@@ -49,6 +53,11 @@ public class VectorIndex
         var scored = new List<(Guid ItemId, float Score)>(snapshot.Entries.Count);
         foreach (var entry in snapshot.Entries)
         {
+            if (allowedIds is { Count: > 0 } && !allowedIds.Contains(entry.ItemId))
+            {
+                continue;
+            }
+
             scored.Add((entry.ItemId, VectorMath.Dot(normalizedQuery, entry.Vector)));
         }
 

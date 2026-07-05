@@ -98,6 +98,32 @@ public sealed class HistoryStore
         }
     }
 
+    /// <summary>Appends items to the newest entry matching the prompt+mode, de-duplicating by item id.</summary>
+    /// <param name="userId">The user id.</param>
+    /// <param name="prompt">The prompt of the entry to append to.</param>
+    /// <param name="mode">The mode of the entry to append to.</param>
+    /// <param name="newItems">The items to append.</param>
+    public void AppendToLatest(Guid userId, string prompt, string mode, IReadOnlyList<HistoryItem> newItems)
+    {
+        if (newItems is null || newItems.Count == 0) { return; }
+        lock (_gate)
+        {
+            var list = LoadUnlocked(userId);
+            var entry = list.FirstOrDefault(e =>
+                string.Equals(e.Mode, mode, StringComparison.Ordinal) &&
+                string.Equals(e.Prompt, prompt, StringComparison.Ordinal));
+            if (entry is null) { return; }
+            var existing = new HashSet<string>(entry.Items.Select(i => i.ItemId), StringComparer.Ordinal);
+            foreach (var it in newItems)
+            {
+                if (!string.IsNullOrEmpty(it.ItemId) && existing.Add(it.ItemId)) { entry.Items.Add(it); }
+            }
+
+            entry.Count = entry.Items.Count;
+            Save(userId, list);
+        }
+    }
+
     /// <summary>Deletes one entry, or the whole file when <paramref name="id"/> is null/empty.</summary>
     /// <param name="userId">The user id.</param>
     /// <param name="id">The entry id, or null to clear all.</param>

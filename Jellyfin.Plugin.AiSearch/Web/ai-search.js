@@ -582,6 +582,7 @@
         var input = els.composer.querySelector('.ais-input');
         var initial = input ? input.value.trim() : '';
         showBack(true);
+        els.content.innerHTML = '';
         if (!initial) { renderStaticInterview(); return; }
         var s = t();
         els.composer.innerHTML =
@@ -782,6 +783,7 @@
                         while (block.firstChild) { grid.appendChild(block.firstChild); }
                         wireCards(grid);
                         results.push.apply(results, more);
+                        loadHistory().then(cacheHistory);
                         moreBtn.disabled = false; moreBtn.innerHTML = IC.sparkle + esc(t().more);
                     })
                     .catch(function () { moreBtn.disabled = false; moreBtn.innerHTML = IC.sparkle + esc(t().more); });

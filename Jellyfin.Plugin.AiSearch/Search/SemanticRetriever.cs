@@ -38,12 +38,14 @@ public class SemanticRetriever
     /// <param name="config">The current plugin configuration.</param>
     /// <param name="prompt">The user's natural-language prompt.</param>
     /// <param name="take">How many ids to return (before user-level filtering).</param>
+    /// <param name="allowedIds">Restricts scoring to these item ids when non-empty.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Ranked item ids, or <c>null</c> to fall back.</returns>
     public async Task<IReadOnlyList<Guid>?> TryRetrieveAsync(
         PluginConfiguration config,
         string prompt,
         int take,
+        HashSet<Guid>? allowedIds,
         CancellationToken cancellationToken)
     {
         var target = EmbeddingsTarget.FromConfiguration(config);
@@ -59,7 +61,7 @@ public class SemanticRetriever
             var vector = vectors[0];
             VectorMath.NormalizeInPlace(vector);
 
-            var hits = _index.Search(vector, take);
+            var hits = _index.Search(vector, take, allowedIds);
             var ids = new List<Guid>(hits.Count);
             foreach (var (itemId, _) in hits)
             {

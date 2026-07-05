@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.5.4.0",
+                "changelog": "Help me choose now hides the recent-searches list while you answer, like a running search. More like this results are now saved into that search's history entry instead of being lost. Episode search is much better: when your query names a series in your library, results are ranked within that series' episodes instead of across the whole library, and the TV retrieval budget was widened.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.5.4.0/ai-search_1.5.4.0.zip",
+                "checksum": "a219628f213ede025f97be41ed4e6684",
+                "timestamp": "2026-07-05T22:30:00Z"
+            },
+            {
                 "version": "1.5.3.0",
                 "changelog": "Fix: Surprise me on TV Shows scope could recommend individual episodes instead of shows. Surprise mode now only picks from series when the TV Shows scope is selected.",
                 "targetAbi": "10.11.0.0",

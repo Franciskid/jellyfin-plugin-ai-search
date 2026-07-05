@@ -380,7 +380,7 @@ public class AiSearchController : ControllerBase
         {
             // Prefer the semantic index; fall back to catalog selection when it is
             // not built/configured or the embedding call fails.
-            candidates = await SemanticCandidatesAsync(c, modelPrompt, movies, playedById, includeWatched, exclude, cancellationToken).ConfigureAwait(false);
+            candidates = await SemanticCandidatesAsync(c, modelPrompt, movies, playedById, includeWatched, exclude, isTv, cancellationToken).ConfigureAwait(false);
             usedSemantic = candidates is not null;
             candidates ??= CandidateSelector.Select(pool, c.SelectionStrategy, Math.Max(10, c.MaxCatalogItems));
         }
@@ -457,12 +457,45 @@ public class AiSearchController : ControllerBase
         Dictionary<Guid, bool> playedById,
         bool includeWatched,
         HashSet<Guid> exclude,
+        bool isTv,
         CancellationToken cancellationToken)
     {
         var maxRetrieve = Math.Clamp(c.MaxRetrieve, 1, 200);
 
         // Over-fetch so watched/visibility filtering still leaves enough.
-        var ids = await _semanticRetriever.TryRetrieveAsync(c, prompt, maxRetrieve * 3, cancellationToken).ConfigureAwait(false);
+        HashSet<Guid>? allowedIds = null;
+        var take = maxRetrieve * 3;
+        if (isTv)
+        {
+            // Episode-dense libraries dilute global ranking; widen the net.
+            take = maxRetrieve * 6;
+
+            // If the query names a series we hold, disambiguate within that
+            // series' episodes instead of across the whole library.
+            var series = DetectSeries(prompt, movies);
+            if (series is not null)
+            {
+                allowedIds = new HashSet<Guid>();
+                foreach (var item in movies)
+                {
+                    if ((item is Episode ep && ep.SeriesId == series.Id) || item.Id == series.Id)
+                    {
+                        allowedIds.Add(item.Id);
+                    }
+                }
+
+                if (allowedIds.Count == 0)
+                {
+                    allowedIds = null; // nothing embedded for it; fall back to global
+                }
+                else
+                {
+                    take = System.Math.Max(maxRetrieve, allowedIds.Count);
+                }
+            }
+        }
+
+        var ids = await _semanticRetriever.TryRetrieveAsync(c, prompt, take, allowedIds, cancellationToken).ConfigureAwait(false);
         if (ids is null)
         {
             return null;
@@ -502,6 +535,31 @@ public class AiSearchController : ControllerBase
         }
 
         return picked.Count > 0 ? picked : null;
+    }
+
+    // Finds the library series whose name appears verbatim (case-insensitive) in
+    // the query, preferring the longest such name so "Star Trek: TNG" beats
+    // "Star Trek". Returns null when the query names no held series.
+    private static BaseItem? DetectSeries(string prompt, IReadOnlyList<BaseItem> movies)
+    {
+        var q = prompt.ToLowerInvariant();
+        BaseItem? best = null;
+        var bestLen = 0;
+        foreach (var item in movies)
+        {
+            if (item is not Series || string.IsNullOrWhiteSpace(item.Name) || item.Name.Length < 3)
+            {
+                continue;
+            }
+
+            if (item.Name.Length > bestLen && q.Contains(item.Name.ToLowerInvariant(), System.StringComparison.Ordinal))
+            {
+                best = item;
+                bestLen = item.Name.Length;
+            }
+        }
+
+        return best;
     }
 
     // --- Platform mode: the platform does the semantic search. ---
@@ -580,6 +638,10 @@ public class AiSearchController : ControllerBase
             {
                 RecordHistory(userId, historyPrompt, mode, items);
             }
+            else
+            {
+                AppendHistory(userId, historyPrompt, mode, items);
+            }
 
             return Ok(new { answer, model, usedProfile, results = ToResults(items) });
         }
@@ -654,6 +716,10 @@ public class AiSearchController : ControllerBase
         if (record)
         {
             RecordHistory(userId, historyPrompt, mode, items);
+        }
+        else
+        {
+            AppendHistory(userId, historyPrompt, mode, items);
         }
 
         var usedProfile = favorites.Count > 0 || watched.Count > 0 || !string.IsNullOrWhiteSpace(tasteProfile);
@@ -803,6 +869,23 @@ public class AiSearchController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "AiSearch: could not record history.");
+        }
+    }
+
+    private void AppendHistory(Guid userId, string prompt, string mode, List<HistoryItem> items)
+    {
+        if (userId == Guid.Empty || items.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            _history.AppendToLatest(userId, prompt, mode, items);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AiSearch: could not append to history.");
         }
     }
 
