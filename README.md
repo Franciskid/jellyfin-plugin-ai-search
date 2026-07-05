@@ -30,7 +30,8 @@ collection.
 ---
 
 
-<img width="1200" height="748" alt="screen_recording_trimmed_under10mb_1200" src="https://github.com/user-attachments/assets/775cbc7b-4718-4350-972d-32b011162715" />
+<img width="1200" height="748" alt="screen_recording_trimmed_full_second_removed_1200" src="https://github.com/user-attachments/assets/db1fdfa3-b91a-4ba0-b75e-da396df542f5" />
+
 
 
 ## How it works
