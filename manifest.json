@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.5.8.0",
+                "changelog": "TV Shows search now works in platform mode: the Movies/TV Shows scope is sent to the platform so TV searches return series and episodes instead of movies (requires the platform's TV/episode semantic index).",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.5.8.0/ai-search_1.5.8.0.zip",
+                "checksum": "d2367648d496e3a0287176d4be0168d3",
+                "timestamp": "2026-07-06T07:00:00Z"
+            },
+            {
                 "version": "1.5.7.0",
                 "changelog": "The 'Reload models' button on the settings page now refreshes reliably: it shows a loading state, disables while fetching, and bypasses browser caching so newly available models always appear instead of a stale list.",
                 "targetAbi": "10.11.0.0",
