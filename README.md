@@ -62,14 +62,14 @@ based on their synopsis, actors, directors etc.., or specific episodes from tv s
 
 **Surprise me** is kind of like the "I'm feeling lucky" Google search (RIP). 
 Instead of matching a query, the plugin hands the model a broad *random* slice of 
-your library (not the usual top-rated suspects) and asks it to pull together a 
-delightfully varied, unexpected mix — still nudged by your favorites and watch 
-history, so  it's random in a way that's tuned to *you*, not random noise. 
+your library (not the usual top-rated suspects) and asks it to pull together a varied 
+and unexpected mix  : still nudged by your favorites and watch 
+history, so  it's random in a way that's tuned to you, not necessarily random noise. 
 Great for rescuing forgotten gems you own and never think to search for.
 
 **Create collection** runs a normal search, then offers to save the whole set as
 a Jellyfin playlist. Name it, hit save, and it shows up in your library like any
-other collection. (You can also save the results of *any* search after the fact —
+other collection. (You can also save the results of *any* search after the fact  :
 there's a "Save to playlist" button next to the results.)
 
 **Help me choose** is the agentic search. If you click it with the box empty, you get a
@@ -87,7 +87,7 @@ little poster sneak-peek. Reopen one to see its results again, or replay it to
 run it fresh. Clear it any time.
 
 **Movies or TV Shows.** A small switch flips the whole popup between searching
-your movies and searching your series *and individual episodes* — so "the
+your movies and searching your series *and individual episodes*  : so "the
 episode where they end up in space" is a fair question. TV needs its own index
 (see below); until it's built, TV search still works, just less precisely.
 
@@ -254,7 +254,7 @@ done in the plugin arguably but that would complexify it so i prefered to not do
 | Option | What it does |
 |---|---|
 | Use semantic retrieval | The good stuff. Uncheck to always use the fallback instead |
-| Also index TV shows & episodes | Enables the "TV Shows" scope by embedding series + every episode. Off by default — episode counts can be large, so the first build after enabling can run a while. Rebuild the index after changing it |
+| Also index TV shows & episodes | Enables the "TV Shows" scope by embedding series + every episode. Off by default  : episode counts can be large, so the first build after enabling can run a while. Rebuild the index after changing it |
 | Embedding model | e.g. `bge-m3`. Empty disables the index |
 | Embedding endpoint URL / key | Only when embeddings live somewhere other than the chat endpoint |
 | Query / document prefix | Only for models that demand them (nomic). Leave empty for bge-m3 |
