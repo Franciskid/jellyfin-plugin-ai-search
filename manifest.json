@@ -9,76 +9,12 @@
         "imageUrl": "",
         "versions": [
             {
-                "version": "1.5.8.0",
-                "changelog": "TV Shows search now works in platform mode: the Movies/TV Shows scope is sent to the platform so TV searches return series and episodes instead of movies (requires the platform's TV/episode semantic index).",
+                "version": "1.0.0.0",
+                "changelog": "Fixed a bug when choosing TV or Movies in platform mode.",
                 "targetAbi": "10.11.0.0",
-                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.5.8.0/ai-search_1.5.8.0.zip",
-                "checksum": "d2367648d496e3a0287176d4be0168d3",
-                "timestamp": "2026-07-06T07:00:00Z"
-            },
-            {
-                "version": "1.5.7.0",
-                "changelog": "The 'Reload models' button on the settings page now refreshes reliably: it shows a loading state, disables while fetching, and bypasses browser caching so newly available models always appear instead of a stale list.",
-                "targetAbi": "10.11.0.0",
-                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.5.7.0/ai-search_1.5.7.0.zip",
-                "checksum": "e1eac4f0b336805514949e4e63c8e341",
-                "timestamp": "2026-07-06T00:20:00Z"
-            },
-            {
-                "version": "1.5.6.0",
-                "changelog": "The synopsis length sent to the AI for each candidate is now configurable in the plugin settings (0 = send the full synopsis, no cropping) instead of a fixed 180 characters. Search history now remembers the AI's answer line, so reopening a past search shows it again instead of only the raw prompt, and history titles read better.",
-                "targetAbi": "10.11.0.0",
-                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.5.6.0/ai-search_1.5.6.0.zip",
-                "checksum": "c51a353c94d36e5d31c7bb7b555e587d",
-                "timestamp": "2026-07-05T23:55:00Z"
-            },
-            {
-                "version": "1.5.4.0",
-                "changelog": "Help me choose now hides the recent-searches list while you answer, like a running search. More like this results are now saved into that search's history entry instead of being lost. Episode search is much better: when your query names a series in your library, results are ranked within that series' episodes instead of across the whole library, and the TV retrieval budget was widened.",
-                "targetAbi": "10.11.0.0",
-                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.5.4.0/ai-search_1.5.4.0.zip",
-                "checksum": "a219628f213ede025f97be41ed4e6684",
-                "timestamp": "2026-07-05T22:30:00Z"
-            },
-            {
-                "version": "1.5.3.0",
-                "changelog": "Fix: Surprise me on TV Shows scope could recommend individual episodes instead of shows. Surprise mode now only picks from series when the TV Shows scope is selected.",
-                "targetAbi": "10.11.0.0",
-                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.5.3.0/ai-search_1.5.3.0.zip",
-                "checksum": "78cd0f941750fb2793308a596a9bcf1a",
-                "timestamp": "2026-07-05T21:30:00Z"
-            },
-            {
-                "version": "1.5.2.0",
-                "changelog": "History rows can now be deleted individually: a subtle cross fades in on hover (desktop) or is revealed by swiping (mobile), with a full swipe deleting immediately. Surprise me now morphs into a full-width button revealing Movies/TV Shows and Personalize to my taste toggles before running, instead of firing immediately.",
-                "targetAbi": "10.11.0.0",
-                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.5.2.0/ai-search_1.5.2.0.zip",
-                "checksum": "3d0b919ab4adef92d01a48cad78a1b2e",
-                "timestamp": "2026-07-05T20:00:00Z"
-            },
-            {
-                "version": "1.5.1.0",
-                "changelog": "Fix: model list dropdown could come back empty even after saving the endpoint URL/key. The Models endpoint now normalizes different provider response shapes (bare array, {data:[...]}, {models:[...]}) and surfaces the real HTTP error in the config page instead of silently showing 'No models returned'.",
-                "targetAbi": "10.11.0.0",
-                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.5.1.0/ai-search_1.5.1.0.zip",
-                "checksum": "9961df5220a92901fb4318ea1ed27653",
-                "timestamp": "2026-07-05T18:41:00Z"
-            },
-            {
-                "version": "1.4.1.0",
-                "changelog": "People queries now work: the model is given each candidate's cast (actors with characters, plus directors) instead of guessing from memory, and only genuine matches are returned. Built against Jellyfin 10.11.0 for 10.11.x compatibility.",
-                "targetAbi": "10.11.0.0",
-                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.4.1.0/ai-search_1.4.1.0.zip",
-                "checksum": "33c586914303e0da74d3e24dcad1104b",
-                "timestamp": "2026-07-03T12:00:00Z"
-            },
-            {
-                "version": "1.4.0.0",
-                "changelog": "Direct mode now builds a local semantic index (embeddings + in-memory nearest-neighbour search) over any OpenAI-compatible endpoint, so results match by meaning instead of sending a catalog slice. Nightly refresh via a scheduled task. Built against Jellyfin 10.11.0 for 10.11.x compatibility.",
-                "targetAbi": "10.11.0.0",
-                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.4.0.0/ai-search_1.4.0.0.zip",
-                "checksum": "56d8bba6861ea39e43a695d9c1b0ba0d",
-                "timestamp": "2026-07-03T00:00:00Z"
+                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.0.0.0/ai-search_1.0.0.0.zip",
+                "checksum": "a2242a02581a8bf4e0fe9ebad36c6207",
+                "timestamp": "2026-07-06T00:00:00Z"
             }
         ]
     }
