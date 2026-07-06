@@ -308,7 +308,7 @@ public class AiSearchController : ControllerBase
 
         if (!IsDirect)
         {
-            return await RecommendPlatform(c, modelPrompt, locale, maxResults, user.Username, userId, includeWatched, historyPrompt, mode, record, cancellationToken).ConfigureAwait(false);
+            return await RecommendPlatform(c, modelPrompt, locale, maxResults, user.Username, userId, includeWatched, isTv, historyPrompt, mode, record, cancellationToken).ConfigureAwait(false);
         }
 
         // Direct mode: one pass over the user's library view gathers the
@@ -565,7 +565,7 @@ public class AiSearchController : ControllerBase
 
     // --- Platform mode: the platform does the semantic search. ---
     private async Task<ActionResult> RecommendPlatform(
-        PluginConfiguration c, string prompt, string locale, int maxResults, string userName, Guid userId, bool includeWatched, string historyPrompt, string mode, bool record, CancellationToken cancellationToken)
+        PluginConfiguration c, string prompt, string locale, int maxResults, string userName, Guid userId, bool includeWatched, bool isTv, string historyPrompt, string mode, bool record, CancellationToken cancellationToken)
     {
         var payload = new
         {
@@ -574,6 +574,7 @@ public class AiSearchController : ControllerBase
             maxResults,
             maxRetrieve = c.MaxRetrieve,
             includeWatched,
+            scope = isTv ? "tv" : "movies",
             locale,
             user = new { id = userId.ToString("N"), name = userName },
             client = new { name = "jellyfin-ai-search", version = ClientVersion }
