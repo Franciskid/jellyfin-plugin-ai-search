@@ -3,27 +3,32 @@
 Ask your movie library a question, in your own words, and get real answers.
 
 > *"something tense and short for tonight, like Sicario"*
+> 
 > *"films about Native Americans"*
-> *"a feel-good movie I haven't seen yet, nothing too long"*
+> 
+> *"a movie starring both dicaprio and brad pitt"*
+> 
+> *"the game of thrones episode with a wedding"*
 
 AI Search adds a little ✨ button to the Jellyfin web client. Tap it and you get
-three ways in: **Search** (type what you're in the mood for), **Surprise me**
-(let it pick), and **Create collection** (turn a vibe into a saved playlist). It
-answers with a handful of movies **from your own library**, each with a one-line
+three ways in: **Search** (type what you're in the mood for, or what you're looking for), 
+**Surprise me** (let it pick), and **Create collection** (turn a vibe into a saved playlist). It
+answers with a handful of movies/tv shows/episodes **from your own library**, each with a one-line
 reason why it fits. It knows what you've already watched and what you marked as
-favorite. Click a result and you land on its detail page, ready to play.
+favorite. Click a result and you land on its detail page.
 
 Not sure what to ask for? Hit **Help me choose** and it interviews you with a few
-quick questions — and if you've already half-typed an idea, those questions adapt
+quick questions, and if you've already half-typed an idea, those questions adapt
 to it. Every search is kept in a private, per-user **history** you can reopen or
-replay, and any set of results can be saved to a playlist in one tap.
+replay, and any set of results can be saved to a playlist.
 
 No third party is involved unless you point the plugin at one. Your prompt goes
 from your browser to your Jellyfin server, and from there to whatever AI
-backend **you** configured: a local Ollama, your own platform, or a hosted API
-if that's what you prefer.
+backend you configured: a local Ollama, your own platform, or a hosted API
+if that's what you prefer. (I personally have my own AI platform running locally, that's
+why I added this option, because I can control everything from there instead)
 
-I built this for my own library (about 3000 movies, mostly with French
+I built this for my own library (about 3000 movies, 15000 episodes, mostly with French
 metadata), so everything below is tested on a real, medium-sized, non-English
 collection.
 
@@ -39,7 +44,7 @@ collection.
 1. A small script injected into the Jellyfin web client renders the search bar
    and talks to the plugin using your existing Jellyfin session. No extra
    login, and no API keys ever reach the browser.
-2. The plugin, server-side, decides which movies are worth showing the AI.
+2. The plugin, server-side, decides which media are worth showing the AI.
    Ideally the ~40 that actually match the meaning of your request, out of the
    whole library.
 3. A language model picks the best few from that shortlist and writes a short
@@ -52,29 +57,30 @@ Step 2 is where most of the work went, so it has its own section below.
 ## Ways to use it
 
 **Search** is the plain one: type a mood, a vibe, a "like *X* but shorter", and
-get your handful of matches with reasons.
+get your handful of matches with reasons. You can also search for specific movie
+based on their synopsis, actors, directors etc.., or specific episodes from tv shows.
 
-**Surprise me** is for when you can't be bothered to type. Instead of matching a
-query, the plugin hands the model a broad *random* slice of your library (not the
-usual top-rated suspects) and asks it to pull together a delightfully varied,
-unexpected mix — still nudged by your favorites and watch history, so it's random
-in a way that's tuned to *you*, not random noise. Great for rescuing forgotten
-gems you own and never think to search for.
+**Surprise me** is kind of like the "I'm feeling lucky" Google search (RIP). 
+Instead of matching a query, the plugin hands the model a broad *random* slice of 
+your library (not the usual top-rated suspects) and asks it to pull together a 
+delightfully varied, unexpected mix — still nudged by your favorites and watch 
+history, so  it's random in a way that's tuned to *you*, not random noise. 
+Great for rescuing forgotten gems you own and never think to search for.
 
 **Create collection** runs a normal search, then offers to save the whole set as
 a Jellyfin playlist. Name it, hit save, and it shows up in your library like any
 other collection. (You can also save the results of *any* search after the fact —
 there's a "Save to playlist" button next to the results.)
 
-**Help me choose** is the fun one. If you click it with the box empty, you get a
-short generic interview — mood, length, seen-it-or-not — and your answers become
+**Help me choose** is the agentic search. If you click it with the box empty, you get a
+short generic interview : mood, length, seen-it-or-not. And your answers become
 the search. But if you've already typed something, the plugin sends *that* to the
 model first and asks it to write the two or three questions that would actually
 narrow *your* request down. Ask for "something like Whiplash" and it might ask
 about tone, era, and how familiar you want it; ask for "a French thriller" and
 you'll get different questions entirely. You tap through them, and your picks get
-folded back into the final search. It's a small thing that turns a vague itch
-into a precise query without making you do the wording.
+folded back into the final search. It's cool when you don't really know how to word
+your request.
 
 **History** keeps your recent searches (per user, stored on the server) with a
 little poster sneak-peek. Reopen one to see its results again, or replay it to
@@ -85,10 +91,10 @@ your movies and searching your series *and individual episodes* — so "the
 episode where they end up in space" is a fair question. TV needs its own index
 (see below); until it's built, TV search still works, just less precisely.
 
-**Two quiet knobs.** A subtle *Personalize* toggle decides whether your taste
+**Two quiet knobs.** The *Personalize* toggle decides whether your taste
 (favorites + watch history) flavors the results, or whether you get a neutral
 search that ignores who you are. And behind the scenes the plugin keeps a short,
-self-updating **taste profile** — the model periodically distills what you seem
+self-updating **taste profile** : the model periodically distills what you seem
 to like from your favorites and history, and feeds that summary into future
 searches so they sharpen as your library and habits evolve. It's never shown or
 sent anywhere but your own AI backend, and the Personalize toggle turns it off.
@@ -103,10 +109,10 @@ sent anywhere but your own AI backend, and the Personalize toggle turns it off.
 | Extra perks | Nothing to install beyond the plugin | Query history, usage accounting, an index shared with other tools |
 | Pick it if... | You want this working in ten minutes | You already run such a platform |
 
-**Most people want Direct mode.** Platform mode exists because I run a small
-self-hosted AI platform at home that already indexes my library and tracks
-usage, and I wanted the plugin to go through it. If you don't have anything
-like that, Direct mode is the one for you.
+**You'll want Direct mode.**  Platform mode exists because I run a small
+self-hosted AI platform at home that already indexes my library, tracks my
+usage and other people using my jellyfin, and I wanted the plugin to go through it.
+If you don't have anything like that, Direct mode is the one for you.
 
 ## The semantic index
 
@@ -123,14 +129,14 @@ goes through the same model, and the plugin compares the numbers, in memory, to
 find the movies closest to what you asked. Those go to the language model,
 together with their synopses.
 
-Some practical numbers, from my 3000-movie library:
+Some practical numbers, from my 18 000 media library:
 
-- **Size:** the whole index is a single 13 MB file. It loads into memory at
+- **Size:** the whole index is a single 100 MB file. It loads into memory at
   startup and a search scans it in a few milliseconds. There is no database to
   run.
 - **First build:** every movie gets embedded once. On my server (Ollama running
   the embedding model on CPU) that took about 40 minutes. On OpenAI with
-  `text-embedding-3-small` it takes a couple of minutes and costs about $0.02.
+  `text-embedding-3-small` it takes a couple of minutes and costs about $0.05.
 - **Upkeep:** a nightly scheduled task ("Build AI Search index") re-embeds only
   movies whose metadata changed. On a normal night that's zero movies, and the
   run finishes in about a minute.
@@ -146,7 +152,7 @@ Some practical numbers, from my 3000-movie library:
 
 - My library and my queries are mostly French, so I use **bge-m3** (on Ollama,
   about 1.2 GB). It's multilingual and needs no special configuration. If your
-  library isn't purely English, I'd start there too.
+  library isn't purely English, I'd use that too.
 - English-only library, hosted API: OpenAI's `text-embedding-3-small` is cheap
   and good.
 - `nomic-embed-text` works, but *only* if you fill in its required prefixes on
@@ -155,9 +161,9 @@ Some practical numbers, from my 3000-movie library:
   quietly degrade into noise, with no error anywhere.
 - A note from my own setup: on my GPU (a GTX 1660 SUPER) bge-m3 returned broken
   embeddings (NaN), while two-word test strings worked fine, which made it very
-  confusing to debug. Running the model on CPU fixed it:
+  confusing to debug. I couldn't debug it so I used the CPU instead :
   `printf 'FROM bge-m3\nPARAMETER num_gpu 0\n' | ollama create bge-m3-cpu -f -`.
-  I haven't looked into whether other cards do this. With 3000 movies, CPU
+  I haven't looked into whether other cards do this. With 18000 media, CPU
   embedding is fast enough that I didn't need to.
 
 ## Getting started
@@ -224,7 +230,10 @@ Application API key: (issued by your platform)
 ```
 
 The platform owns the index; the plugin just sends the prompt and your user id.
-The contract is documented at the bottom of this file.
+The contract is documented at the bottom of this file. The advantage with this method
+is that if you have a lot of users, things could get expensive if they spam search, so
+through an external platform you can limit everyone however you want (though it could be
+done in the plugin arguably but that would complexify it so i prefered to not do it)
 
 ## Every option, explained
 
@@ -272,8 +281,8 @@ The contract is documented at the bottom of this file.
   tokens (for 40 movie sent to the model (so with titles, actors, synopsis etc) it
   goes up to 7000 tokens, which for mistral-medium which i am using equals to about 0.01$,
   there is probably some optimization to do, and a better model wouldn't need so much
-  info about a movie i guess so that would shrik the payload),
-  and the index build was a one-time $0.02 for my library.
+  info about a movie i guess so that would shrink the payload),
+  and the index build was a one-time $0.05 for my library.
 
 ## Troubleshooting
 
@@ -313,7 +322,7 @@ repeats; those follow-up calls aren't recorded in history).
 
 ### Platform mode contract
 
-The plugin POSTs to `{PlatformApiUrl}/api/media/recommend` with a bearer key:
+The plugin POSTs to `{PlatformApiUrl}/api/media/recommend` (could be configurable in the plugin tbh) with a bearer key:
 
 ```jsonc
 {
