@@ -306,9 +306,20 @@ public class AiSearchController : ControllerBase
         var historyPrompt = isSurprise ? string.Empty : request.Prompt!.Trim();
         var modelPrompt = isSurprise ? SurprisePrompt : historyPrompt;
 
+        // A stable id tying an initial search to its "see more" follow-ups into one
+        // conversation. The first page starts a new id; "see more" reuses the latest
+        // matching history entry's id (each entry == one conversation). Sent to the
+        // platform so its usage history can group the turns as a single thread.
+        var conversationId = record
+            ? Guid.NewGuid().ToString("N")
+            : (_history.Load(userId).FirstOrDefault(e =>
+                   string.Equals(e.Mode, mode, StringComparison.Ordinal) &&
+                   string.Equals(e.Prompt, historyPrompt, StringComparison.Ordinal))?.Id
+               ?? Guid.NewGuid().ToString("N"));
+
         if (!IsDirect)
         {
-            return await RecommendPlatform(c, modelPrompt, locale, maxResults, user.Username, userId, includeWatched, isTv, historyPrompt, mode, record, cancellationToken).ConfigureAwait(false);
+            return await RecommendPlatform(c, modelPrompt, locale, maxResults, user.Username, userId, includeWatched, isTv, historyPrompt, mode, record, conversationId, request.ExcludeItemIds, cancellationToken).ConfigureAwait(false);
         }
 
         // Direct mode: one pass over the user's library view gathers the
@@ -402,7 +413,7 @@ public class AiSearchController : ControllerBase
             MaybeRefreshProfile(c, userId, favorites, watched, locale);
         }
 
-        return await RecommendDirect(c, modelPrompt, locale, maxResults, enriched, favorites, watched, usedSemantic, userId, historyPrompt, mode, record, profileText, cancellationToken).ConfigureAwait(false);
+        return await RecommendDirect(c, modelPrompt, locale, maxResults, enriched, favorites, watched, usedSemantic, userId, historyPrompt, mode, record, conversationId, profileText, cancellationToken).ConfigureAwait(false);
     }
 
     // Regenerates the taste profile in the background when it is missing, older
@@ -565,7 +576,7 @@ public class AiSearchController : ControllerBase
 
     // --- Platform mode: the platform does the semantic search. ---
     private async Task<ActionResult> RecommendPlatform(
-        PluginConfiguration c, string prompt, string locale, int maxResults, string userName, Guid userId, bool includeWatched, bool isTv, string historyPrompt, string mode, bool record, CancellationToken cancellationToken)
+        PluginConfiguration c, string prompt, string locale, int maxResults, string userName, Guid userId, bool includeWatched, bool isTv, string historyPrompt, string mode, bool record, string conversationId, string[]? excludeItemIds, CancellationToken cancellationToken)
     {
         var payload = new
         {
@@ -576,6 +587,11 @@ public class AiSearchController : ControllerBase
             includeWatched,
             scope = isTv ? "tv" : "movies",
             locale,
+            conversationId,
+            // Already-shown ids so a "see more" returns fresh picks instead of
+            // repeating the first page (empty on the first page). Without this the
+            // platform re-ran the identical search and returned the same results.
+            excludeItemIds = excludeItemIds ?? Array.Empty<string>(),
             user = new { id = userId.ToString("N"), name = userName },
             client = new { name = "jellyfin-ai-search", version = ClientVersion }
         };
@@ -638,7 +654,7 @@ public class AiSearchController : ControllerBase
 
             if (record)
             {
-                RecordHistory(userId, historyPrompt, mode, answer ?? string.Empty, items);
+                RecordHistory(userId, conversationId, historyPrompt, mode, answer ?? string.Empty, items);
             }
             else
             {
@@ -656,7 +672,7 @@ public class AiSearchController : ControllerBase
 
     // --- Direct mode: candidates in, OpenAI-compatible completion out. ---
     private async Task<ActionResult> RecommendDirect(
-        PluginConfiguration c, string prompt, string locale, int maxResults, List<CandidateMovie> candidates, List<string> favorites, List<string> watched, bool usedSemantic, Guid userId, string historyPrompt, string mode, bool record, string? tasteProfile, CancellationToken cancellationToken)
+        PluginConfiguration c, string prompt, string locale, int maxResults, List<CandidateMovie> candidates, List<string> favorites, List<string> watched, bool usedSemantic, Guid userId, string historyPrompt, string mode, bool record, string conversationId, string? tasteProfile, CancellationToken cancellationToken)
     {
         if (candidates.Count == 0)
         {
@@ -717,7 +733,7 @@ public class AiSearchController : ControllerBase
 
         if (record)
         {
-            RecordHistory(userId, historyPrompt, mode, parsed.Answer ?? string.Empty, items);
+            RecordHistory(userId, conversationId, historyPrompt, mode, parsed.Answer ?? string.Empty, items);
         }
         else
         {
@@ -850,7 +866,7 @@ public class AiSearchController : ControllerBase
         }
     }
 
-    private void RecordHistory(Guid userId, string prompt, string mode, string answer, List<HistoryItem> items)
+    private void RecordHistory(Guid userId, string conversationId, string prompt, string mode, string answer, List<HistoryItem> items)
     {
         if (userId == Guid.Empty || items.Count == 0)
         {
@@ -861,7 +877,9 @@ public class AiSearchController : ControllerBase
         {
             _history.Add(userId, new HistoryEntry
             {
-                Id = Guid.NewGuid().ToString("N"),
+                // The entry id doubles as the conversation id sent to the platform,
+                // so "see more" follow-ups (which append to this entry) share it.
+                Id = string.IsNullOrEmpty(conversationId) ? Guid.NewGuid().ToString("N") : conversationId,
                 At = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
                 Prompt = prompt,
                 Answer = answer,

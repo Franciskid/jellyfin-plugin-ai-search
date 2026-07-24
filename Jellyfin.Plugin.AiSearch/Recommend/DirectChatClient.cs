@@ -67,9 +67,13 @@ public class DirectChatClient
         bool wantJson,
         CancellationToken cancellationToken)
     {
+        // max_tokens is the *combined* budget for a reasoning model's internal
+        // thinking and its visible answer. 900 was too small: a reasoning model
+        // (e.g. gpt-5.6-luna at high effort) spent it all thinking, hit the cap and
+        // returned empty content — an empty recommendation. 4096 leaves ample room.
         object payload = wantJson
-            ? new { model = config.Model, temperature = 0.4, max_tokens = 900, response_format = new { type = "json_object" }, messages }
-            : new { model = config.Model, temperature = 0.4, max_tokens = 900, messages };
+            ? new { model = config.Model, temperature = 0.4, max_tokens = 4096, response_format = new { type = "json_object" }, messages }
+            : new { model = config.Model, temperature = 0.4, max_tokens = 4096, messages };
 
         using var client = _httpClientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(Math.Clamp(config.TimeoutSeconds, 5, 120));
