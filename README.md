@@ -189,13 +189,6 @@ https://raw.githubusercontent.com/Franciskid/jellyfin-plugin-ai-search/main/mani
 
 then install **AI Search** from the catalog and restart Jellyfin.
 
-Or build it yourself (Docker required, no local .NET needed):
-
-```sh
-./build.sh
-# copy dist/AiSearch/ into <jellyfin-config>/plugins/AiSearch_<version>/ and restart
-```
-
 Then open **Dashboard → Plugins → AI Search**.
 
 ### Recipe: fully local with Ollama (what I recommend)
