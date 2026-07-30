@@ -13,7 +13,7 @@
                 "changelog": "One unified setup: a chat endpoint plus a local or remote retrieval source (replaces the old Direct/Platform modes). New: search without a language model, returning retrieval matches ranked by relevance with no per-result reasons. Embedding model is now a dropdown, and endpoints are configured per capability.",
                 "targetAbi": "10.11.0.0",
                 "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.1.0.0/ai-search_1.1.0.0.zip",
-                "checksum": "177cd1303f733800e27f4d964f5c0c41",
+                "checksum": "afd500be5d07c26705ba961f4c6a918c",
                 "timestamp": "2026-07-30T00:00:00Z"
             },
             {

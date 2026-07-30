@@ -80,7 +80,7 @@
             movies: function (n) { return n + (n === 1 ? ' film' : ' films'); },
             noMatches: 'Rien dans votre bibliothèque ne correspond. Reformulez.',
             unavailable: 'La recherche IA est indisponible pour le moment.',
-            disabled: 'La recherche IA n'est pas configurée.',
+            disabled: "La recherche IA n'est pas configurée.",
             timeout: 'Le service IA a expiré. Réessayez.',
             more: 'Plus comme ça',
             searchAgain: 'Relancer',

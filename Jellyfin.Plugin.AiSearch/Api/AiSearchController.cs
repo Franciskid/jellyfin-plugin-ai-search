@@ -150,6 +150,9 @@ public class AiSearchController : ControllerBase
     [AllowAnonymous]
     public ActionResult ClientScript()
     {
+        // The injected <script> tag is unversioned, so tell browsers to revalidate;
+        // otherwise a stale cached copy survives plugin updates.
+        Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
         var stream = GetType().Assembly
             .GetManifestResourceStream("Jellyfin.Plugin.AiSearch.Web.ai-search.js");
         return stream is null ? NotFound() : File(stream, "application/javascript; charset=utf-8");
