@@ -20,7 +20,7 @@ public class VectorIndex
     public void Replace(IndexSnapshot snapshot) => _current = snapshot;
 
     /// <summary>
-    /// Whether the index can serve queries for the given model — it exists,
+    /// Whether the index can serve queries for the given model, it exists,
     /// has entries, and was built with the same embedding model (vectors from
     /// different models live in incompatible spaces).
     /// </summary>
@@ -39,7 +39,7 @@ public class VectorIndex
     /// <param name="take">How many hits to return.</param>
     /// <param name="allowedIds">
     /// Optional filter: when non-null and non-empty, only entries whose item id is
-    /// in this set are scored — used to scope a query to a single series' episodes.
+    /// in this set are scored, used to scope a query to a single series' episodes.
     /// </param>
     /// <returns>Item ids with their cosine similarity, descending.</returns>
     public IReadOnlyList<(Guid ItemId, float Score)> Search(float[] normalizedQuery, int take, HashSet<Guid>? allowedIds = null)

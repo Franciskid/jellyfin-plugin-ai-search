@@ -6,7 +6,7 @@
     "framework": "net9.0",
     "owner": "Franciskid",
     "overview": "AI natural-language search & recommendations from your own library.",
-    "description": "Adds an AI search bar to the Jellyfin web client. Ask in natural language and get movies from your own library, personalized to your watch history — backed by a self-hosted AI platform or any OpenAI-compatible endpoint.",
+    "description": "Adds an AI search bar to the Jellyfin web client. Ask in natural language and get titles from your own library, personalized to your watch history. Works with any OpenAI-compatible model, with a local or remote retrieval source.",
     "category": "General",
     "timestamp": "2026-07-24T00:00:00.0000000Z"
 }

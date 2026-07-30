@@ -11,7 +11,7 @@ namespace Jellyfin.Plugin.AiSearch.Search;
 
 /// <summary>
 /// Minimal client for the OpenAI-compatible <c>/v1/embeddings</c> endpoint
-/// (OpenAI, Ollama, LiteLLM, …). Stateless: the target is passed per call so
+/// (OpenAI, Ollama, LiteLLM, ...). Stateless: the target is passed per call so
 /// configuration changes apply immediately.
 /// </summary>
 public class EmbeddingsClient
@@ -27,7 +27,7 @@ public class EmbeddingsClient
 
     /// <summary>
     /// Embeds a batch of strings, preserving input order. Vectors are returned
-    /// raw (not normalized) — callers normalize once, where it matters.
+    /// raw (not normalized), callers normalize once, where it matters.
     /// </summary>
     /// <param name="target">Endpoint, key and model to use.</param>
     /// <param name="inputs">The texts to embed.</param>
@@ -48,9 +48,10 @@ public class EmbeddingsClient
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", target.ApiKey);
         }
 
-        var url = target.BaseUrl + "/v1/embeddings";
+        // The configured embeddings endpoint is a full URL (like the chat endpoint),
+        // used verbatim, not a base to which a path is appended.
         using var response = await client
-            .PostAsJsonAsync(url, new { model = target.Model, input = inputs }, cancellationToken)
+            .PostAsJsonAsync(target.BaseUrl, new { model = target.Model, input = inputs }, cancellationToken)
             .ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)

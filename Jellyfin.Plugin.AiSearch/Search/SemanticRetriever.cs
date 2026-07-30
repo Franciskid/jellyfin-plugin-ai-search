@@ -30,7 +30,7 @@ public class SemanticRetriever
     }
 
     /// <summary>
-    /// Retrieves the ids most similar to the prompt, best first — or <c>null</c>
+    /// Retrieves the ids most similar to the prompt, best first, or <c>null</c>
     /// when semantic search cannot serve this query (not configured, index not
     /// built / built with another model, or the embedding call failed). A
     /// <c>null</c> tells the caller to fall back to the non-semantic strategy.

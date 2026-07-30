@@ -15,7 +15,7 @@ public static class PromptBuilder
 {
     /// <summary>Builds the chat messages for an OpenAI-compatible completion call.</summary>
     /// <param name="prompt">The user's request.</param>
-    /// <param name="locale">"fr" or "en" — the language for answer and reasons.</param>
+    /// <param name="locale">"fr" or "en", the language for answer and reasons.</param>
     /// <param name="maxResults">How many recommendations to ask for.</param>
     /// <param name="candidates">The movies the model may choose from.</param>
     /// <param name="favorites">Title (year) list of the user's favorites, as a taste signal.</param>
@@ -27,7 +27,7 @@ public static class PromptBuilder
     /// </param>
     /// <param name="synopsisLength">
     /// Maximum synopsis length (chars) per candidate. 0 or less means no
-    /// limit — the full synopsis is sent uncropped.
+    /// limit, the full synopsis is sent uncropped.
     /// </param>
     /// <returns>The messages array for the completions payload.</returns>
     public static object[] BuildMessages(
@@ -95,7 +95,7 @@ public static class PromptBuilder
     /// generic mood/time/seen questions.
     /// </summary>
     /// <param name="prompt">The user's initial request.</param>
-    /// <param name="locale">"fr" or "en" — the language for the questions.</param>
+    /// <param name="locale">"fr" or "en", the language for the questions.</param>
     /// <returns>The messages array for the completions payload.</returns>
     public static object[] BuildInterviewMessages(string prompt, string locale)
     {
@@ -104,7 +104,7 @@ public static class PromptBuilder
             "You help a user refine a movie search of their personal library. " +
             "Given their initial request, produce 2 or 3 short multiple-choice questions whose answers would most " +
             "help narrow down a great recommendation. Ask ONLY about dimensions the request leaves open (for example " +
-            "tone, era, pace, length, language, or how familiar they want it) — never re-ask something the request " +
+            "tone, era, pace, length, language, or how familiar they want it), never re-ask something the request " +
             "already states. Each question must have between 2 and 5 concise options (a few words each). " +
             "Write every question and option in " + language + ". " +
             "Respond with STRICT minified JSON only (no markdown, no prose) of exactly this shape: " +
@@ -124,7 +124,7 @@ public static class PromptBuilder
     /// </summary>
     /// <param name="favorites">Title (year) list of favorites.</param>
     /// <param name="watched">Title (year) list of watched titles.</param>
-    /// <param name="locale">"fr" or "en" — the language for the summary.</param>
+    /// <param name="locale">"fr" or "en", the language for the summary.</param>
     /// <returns>The messages array for the completions payload.</returns>
     public static object[] BuildTasteProfileMessages(List<string> favorites, List<string> watched, string locale)
     {
@@ -134,7 +134,7 @@ public static class PromptBuilder
             "From their favorites and most-watched titles, write 2 to 4 sentences capturing what they seem to enjoy: " +
             "genres, tones, eras, pacing, languages, and any directors or themes that recur. Be specific and concrete, " +
             "not generic. Do not list the titles back; describe the taste behind them. Write in " + language + ". " +
-            "Output ONLY the summary as plain prose — no JSON, no quotes, no field names, no code fences, no preamble.";
+            "Output ONLY the summary as plain prose, no JSON, no quotes, no field names, no code fences, no preamble.";
 
         var user = new StringBuilder();
         if (favorites.Count > 0)
@@ -204,6 +204,6 @@ public static class PromptBuilder
 
         var cut = cleaned[..synopsisLength];
         var lastSpace = cut.LastIndexOf(' ');
-        return (lastSpace > synopsisLength * 0.6 ? cut[..lastSpace] : cut) + "…";
+        return (lastSpace > synopsisLength * 0.6 ? cut[..lastSpace] : cut) + "...";
     }
 }

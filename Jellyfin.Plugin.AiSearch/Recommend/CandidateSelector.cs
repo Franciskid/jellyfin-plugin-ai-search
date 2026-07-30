@@ -7,7 +7,7 @@ namespace Jellyfin.Plugin.AiSearch.Recommend;
 
 /// <summary>
 /// The non-semantic candidate picker (direct mode's fallback): choose which
-/// slice of the catalog the model gets to see when there is no index —
+/// slice of the catalog the model gets to see when there is no index -
 /// top-rated, a random sample, or half of each.
 /// </summary>
 public static class CandidateSelector

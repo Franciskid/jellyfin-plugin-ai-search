@@ -73,7 +73,7 @@ public class VectorIndexStore
         }
         catch (Exception ex)
         {
-            // A corrupt file is not fatal — the next build simply recreates it.
+            // A corrupt file is not fatal, the next build simply recreates it.
             _logger.LogWarning(ex, "AiSearch: could not load the index file; it will be rebuilt.");
             return null;
         }

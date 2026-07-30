@@ -99,20 +99,30 @@ to like from your favorites and history, and feeds that summary into future
 searches so they sharpen as your library and habits evolve. It's never shown or
 sent anywhere but your own AI backend, and the Personalize toggle turns it off.
 
-## Two modes
+## How you configure it
 
-| | **Direct** | **Platform** |
+There is one flow, and you configure two things.
+
+1. **A language model (chat).** Any OpenAI-compatible `/v1/chat/completions`
+   endpoint (Ollama, OpenAI, LiteLLM, OpenRouter...), or a compatible
+   `/api/media/chat`. This is what picks the results and writes the reasons. You
+   set its URL, an optional key, and the model.
+2. **A retrieval source.** This produces the shortlist of candidates the model
+   picks from. Two choices:
+
+| | **Local index** | **Remote service** |
 |---|---|---|
-| What you need | Any OpenAI-compatible endpoint (Ollama, OpenAI, LiteLLM, OpenRouter...) | A self-hosted AI platform implementing the recommend contract |
-| Who finds the candidates | The plugin itself, on your Jellyfin server | The platform, from its own index of your library |
-| Personalization | Watch state + favorites, read locally | Watch state + favorites, read live per query |
-| Extra perks | Nothing to install beyond the plugin | Query history, usage accounting, an index shared with other tools |
-| Pick it if... | You want this working in ten minutes | You already run such a platform |
+| Where candidates come from | An embedding index the plugin builds and stores on your Jellyfin server | A search endpoint you point it at |
+| What you set | An embeddings endpoint + model | A search endpoint URL + key |
+| Extra infrastructure | None beyond the plugin | A service that indexes your library and answers the search contract |
+| Pick it if... | You want everything self-contained on the Jellyfin box | You already run a service that holds the index (per-user limits, an index shared with other tools) |
 
-**You'll want Direct mode.**  Platform mode exists because I run a small
-self-hosted AI platform at home that already indexes my library, tracks my
-usage and other people using my jellyfin, and I wanted the plugin to go through it.
-If you don't have anything like that, Direct mode is the one for you.
+Either way the plugin does the same work: it gathers your watch state and
+favorites, gets candidates from the retrieval source, sends them to the chat
+model, and maps the picks back to items in your library. Local retrieval is the
+simplest to start with. Remote retrieval keeps the index off the Jellyfin box,
+which is what I use, since I run a small self-hosted service at home that already
+indexes my library and tracks usage across the people on my Jellyfin.
 
 ## The semantic index
 
@@ -191,11 +201,13 @@ Then open **Dashboard → Plugins → AI Search**.
 ### Recipe: fully local with Ollama (what I recommend)
 
 ```
-Mode:                     Direct
-OpenAI-compatible URL:    http://<ollama-host>:11434
-Endpoint API key:         (leave empty)
-Embedding model:          bge-m3        (ollama pull bge-m3 first)
-Model:                    pick a chat model from the dropdown
+Chat endpoint URL:    http://<ollama-host>:11434/v1/chat/completions
+Chat API key:         (leave empty)
+Models endpoint URL:  http://<ollama-host>:11434/v1/models
+Model:                pick a chat model from the dropdown
+Retrieval:            Local index
+Embeddings endpoint:  http://<ollama-host>:11434/v1/embeddings
+Embedding model:      bge-m3        (ollama pull bge-m3 first)
 ```
 
 Save, then click **Build index now**. When the status line shows your library
@@ -204,11 +216,13 @@ size, search away. Nothing ever leaves your network.
 ### Recipe: OpenAI
 
 ```
-Mode:                     Direct
-OpenAI-compatible URL:    https://api.openai.com
-Endpoint API key:         sk-...
-Embedding model:          text-embedding-3-small
-Model:                    gpt-4o-mini (or whatever the dropdown offers)
+Chat endpoint URL:    https://api.openai.com/v1/chat/completions
+Chat API key:         sk-...
+Models endpoint URL:  https://api.openai.com/v1/models
+Model:                gpt-4o-mini (or whatever the dropdown offers)
+Retrieval:            Local index
+Embeddings endpoint:  https://api.openai.com/v1/embeddings
+Embedding model:      text-embedding-3-small
 ```
 
 Same dance: save, then Build index now. Prompts and movie metadata will be sent
@@ -216,56 +230,68 @@ to OpenAI; that's the trade for zero local compute.
 
 ### Recipe: OpenRouter (or any chat-only provider)
 
-OpenRouter doesn't serve embeddings. Point the chat side at OpenRouter, and
-fill the **Embedding endpoint URL / key** fields with something that does
-serve them. A local Ollama works well: chat goes to OpenRouter, embeddings
-stay home.
+OpenRouter doesn't serve embeddings. Point the chat endpoint at OpenRouter, and
+set the embeddings endpoint to something that does serve them. A local Ollama
+works well: chat goes to OpenRouter, embeddings stay home.
 
-### Recipe: Platform mode
+### Recipe: remote retrieval
 
 ```
-Mode:               Platform
-Platform API URL:   https://api.your-platform.example
-Application API key: (issued by your platform)
+Chat endpoint URL:    https://ai.your-service.example/api/media/chat
+Chat API key:         (issued by your service)
+Models endpoint URL:  https://ai.your-service.example/api/media/models
+Model:                pick from the dropdown
+Retrieval:            Remote service
+Search endpoint URL:  https://ai.your-service.example/api/media/search
+Search API key:       (issued by your service)
 ```
 
-The platform owns the index; the plugin just sends the prompt and your user id.
-The contract is documented at the bottom of this file. The advantage with this method
-is that if you have a lot of users, things could get expensive if they spam search, so
-through an external platform you can limit everyone however you want (though it could be
-done in the plugin arguably but that would complexify it so i prefered to not do it)
+The service owns the index and returns candidates; the plugin still does the
+model call and maps results back to your library. Useful when you already run a
+service that indexes your library, or want to cap per-user usage centrally. The
+contract is documented at the bottom of this file.
 
 ## Every option, explained
+
+**Language model**
+
+| Option | What it does |
+|---|---|
+| Enable AI search | Master switch. Also hides the search bar in the web client |
+| Chat endpoint URL | Full URL of an OpenAI-compatible chat-completions endpoint (or an `/api/media/chat`). Used verbatim |
+| Chat API key | Bearer key for that endpoint. Blank if it needs none |
+| Model | The chat model that picks and explains. The dropdown loads from the models endpoint: save first, then "Reload models" |
+| Models endpoint URL | Lists models for the dropdown (e.g. `/v1/models`). Optional |
+| "Help me choose" model | Optional cheaper model for the interview questions. Blank reuses Model |
+
+**Retrieval**
+
+| Option | What it does |
+|---|---|
+| Retrieval source | Local index (built here) or Remote service |
+| Search endpoint URL / key | Remote only. Returns ranked candidates for a query |
+| Embeddings endpoint URL / key | Local only. An OpenAI-compatible `/v1/embeddings` URL. Blank disables the local index |
+| Embedding model | Local only. Chosen from a dropdown loaded from the embedding models endpoint |
+| Embedding models endpoint URL | Local only. Lists embedding models for that dropdown. Blank reuses the main models endpoint |
+| Also index TV shows & episodes | Local only. Enables the "TV Shows" scope by embedding series + every episode. First build can run a while |
+| Query / document prefix | Local only. For models that demand them (nomic). Leave blank for bge-m3 |
+| Build index now | Builds or refreshes the local index immediately. The status line shows progress and the last error |
+
+**Local fallback (used until the index exists)**
+
+| Option | What it does |
+|---|---|
+| Candidate titles sent to the model | Size of the catalog slice (default 350) |
+| How candidates are chosen | Top rated / random sample / mix |
 
 **Shared**
 
 | Option | What it does |
 |---|---|
-| Enable AI search | Master switch. Also hides the search bar in the web client |
-| Mode | Direct or Platform (see above) |
-| Model | The chat model that picks and explains. The dropdown is loaded from your endpoint: save the URL/key first, then "Reload models" |
-| Candidates retrieved per query | How many semantically-matched movies the model chooses from (default 40). More means broader but slower and pricier |
-| Max results | How many recommendations come back (default 6) |
-| Include movies you've already watched | Off by default, since the point is usually discovery |
-| Request timeout | Seconds before giving up on the AI backend |
-
-**Direct mode: semantic index**
-
-| Option | What it does |
-|---|---|
-| Use semantic retrieval | The good stuff. Uncheck to always use the fallback instead |
-| Also index TV shows & episodes | Enables the "TV Shows" scope by embedding series + every episode. Off by default  : episode counts can be large, so the first build after enabling can run a while. Rebuild the index after changing it |
-| Embedding model | e.g. `bge-m3`. Empty disables the index |
-| Embedding endpoint URL / key | Only when embeddings live somewhere other than the chat endpoint |
-| Query / document prefix | Only for models that demand them (nomic). Leave empty for bge-m3 |
-| Build index now | Builds or refreshes immediately. The status line shows progress and the last error, if any |
-
-**Direct mode: fallback (used until the index exists)**
-
-| Option | What it does |
-|---|---|
-| Candidate movies sent to the model | Size of the catalog slice (default 350) |
-| How candidates are chosen | Top rated / random sample / mix |
+| Candidates retrieved per query | How many candidates the model chooses from (default 40). More means broader but slower and pricier |
+| Max results | How many recommendations come back |
+| Include titles you've already watched | Off by default, since the point is usually discovery |
+| Request timeout | Seconds before giving up on the backend |
 
 ## Privacy and cost
 
@@ -311,8 +337,9 @@ done in the plugin arguably but that would complexify it so i prefered to not do
 | `DELETE /AiSearch/History[/{id}]` | Jellyfin session | Delete one search, or clear all |
 | `POST /AiSearch/Playlist` | Jellyfin session | Save a set of results as a playlist for the caller |
 | `GET /AiSearch/Health` | Jellyfin session | Enabled/configured state for the client script |
-| `GET /AiSearch/Models` | Jellyfin session | Model list proxied from your backend |
-| `GET /AiSearch/IndexStatus` | Admin | Semantic index state (the config page uses this) |
+| `GET /AiSearch/Models` | Jellyfin session | Chat-model list proxied from the models endpoint |
+| `GET /AiSearch/EmbeddingModels` | Jellyfin session | Embedding-model list for the local-index dropdown |
+| `GET /AiSearch/IndexStatus` | Admin | Local index state (the config page uses this) |
 | `POST /AiSearch/RebuildIndex` | Admin | Kick a background index build |
 | `GET /AiSearch/ClientScript` | none | The injected UI script (contains no secrets) |
 
@@ -320,37 +347,45 @@ done in the plugin arguably but that would complexify it so i prefered to not do
 `includeWatched`, and `excludeItemIds` (used by "More like this" to avoid
 repeats; those follow-up calls aren't recorded in history).
 
-### Platform mode contract
+### Remote retrieval contract
 
-The plugin POSTs to `{PlatformApiUrl}/api/media/recommend` (could be configurable in the plugin tbh) with a bearer key:
+In Remote mode the plugin talks to three endpoints, each a full URL you
+configure, authenticated with a bearer key. All are OpenAI-shaped where it
+makes sense, so a plain OpenAI-compatible server also fits.
+
+**Search** (required): `POST {SearchEndpointUrl}` returns ranked candidates with
+no model call. The plugin builds the prompt and picks from these.
 
 ```jsonc
+// request
 {
-  "prompt": "a slow-burn western",
-  "model": "some-model-alias",        // optional
-  "maxResults": 6,
-  "maxRetrieve": 40,
+  "query": "a slow-burn western",
+  "scope": "movies",                   // or "tv"
+  "maxResults": 40,
   "includeWatched": false,
-  "locale": "en",                      // or "fr"
-  "user": { "id": "<jellyfin-user-guid>", "name": "<username>" },
-  "client": { "name": "jellyfin-ai-search", "version": "<plugin version>" }
+  "excludeItemIds": ["<id>", "..."],   // "more like this" pagination
+  "user": { "id": "<jellyfin-user-guid>", "name": "<username>" }
 }
-```
-
-and expects:
-
-```jsonc
+// response
 {
-  "answer": "one short sentence",
-  "model": "model-actually-used",
-  "usedProfile": true,
-  "recommendations": [
-    { "itemId": "<jellyfin-item-guid>", "title": "...", "year": 2017, "reason": "..." }
+  "model": "embedding-model-used",
+  "retrieved": 40,
+  "results": [
+    { "itemId": "<jellyfin-item-guid>", "title": "...", "year": 2017,
+      "mediaType": "movie", "genres": ["..."], "overview": "...", "score": 0.55 }
   ]
 }
 ```
 
-Any backend implementing this works.
+**Chat** (required): `POST {ChatEndpointUrl}` is a standard chat completion
+(`{ model, messages, max_tokens }` in, `{ choices: [{ message: { content } }] }`
+out), so any `/v1/chat/completions` works.
+
+**Models** (optional): `GET {ModelsEndpointUrl}` returns `{ "data": [{ "id": "..." }] }`
+for the dropdowns. For the embedding dropdown, `EmbeddingModelsEndpointUrl` may
+add a `?capability=embedding` filter when the service supports it.
+
+Only `itemId` is required from search results; the rest is used for context.
 
 ## Compatibility
 

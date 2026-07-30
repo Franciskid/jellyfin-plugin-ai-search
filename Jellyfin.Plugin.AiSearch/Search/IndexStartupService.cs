@@ -26,7 +26,7 @@ public class IndexStartupService : IHostedService
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        // Load off the startup path — a large index shouldn't delay the server.
+        // Load off the startup path, a large index shouldn't delay the server.
         _ = Task.Run(
             () =>
             {

@@ -30,7 +30,7 @@ public static class VectorMath
         }
     }
 
-    /// <summary>Dot product — cosine similarity for unit vectors.</summary>
+    /// <summary>Dot product, cosine similarity for unit vectors.</summary>
     /// <param name="left">First vector.</param>
     /// <param name="right">Second vector (same length).</param>
     /// <returns>The dot product.</returns>

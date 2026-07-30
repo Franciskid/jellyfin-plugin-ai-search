@@ -4,7 +4,7 @@ namespace Jellyfin.Plugin.AiSearch.Recommend;
 
 /// <summary>
 /// A movie the model may choose from, plus a pre-formatted cast line. The cast
-/// is resolved from live Jellyfin metadata at prompt time (nothing is stored) —
+/// is resolved from live Jellyfin metadata at prompt time (nothing is stored) -
 /// it's what lets the model answer people queries ("movies with X and Y")
 /// instead of guessing the cast from its own memory.
 /// </summary>

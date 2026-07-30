@@ -52,7 +52,7 @@ public class RecommendRequest
     /// </summary>
     public bool? Personalize { get; set; }
 
-    /// <summary>Gets or sets item ids to exclude — used by "show more" to avoid repeats.</summary>
+    /// <summary>Gets or sets item ids to exclude, used by "show more" to avoid repeats.</summary>
     public string[]? ExcludeItemIds { get; set; }
 }
 
@@ -77,12 +77,11 @@ public class PlaylistRequest
 }
 
 /// <summary>
-/// Authenticates the caller and returns movie recommendations. In
-/// <c>platform</c> mode it sends the prompt + user to the configured platform
-/// (which runs a semantic search over the library); in <c>direct</c> mode it
-/// retrieves candidates itself — from the plugin's own semantic index when one
-/// is built, or by catalog selection otherwise — and calls any
-/// OpenAI-compatible endpoint.
+/// Authenticates the caller and returns recommendations. Retrieval is either
+/// remote (a search endpoint returns candidates) or local (the plugin's own
+/// semantic index, falling back to catalog selection when none is built). Either
+/// way the chosen candidates go to an OpenAI-compatible chat endpoint that picks
+/// and explains the results.
 /// </summary>
 [ApiController]
 [Route("AiSearch")]
@@ -124,7 +123,7 @@ public class AiSearchController : ControllerBase
         _logger = logger;
     }
 
-    // Synthetic request for surprise mode — the model still personalizes via the
+    // Synthetic request for surprise mode, the model still personalizes via the
     // user's favorites/watched signals, but is steered toward variety.
     private const string SurprisePrompt =
         "Surprise me. From the candidates, pick a delightfully varied, unexpected mix I might enjoy " +
@@ -132,14 +131,19 @@ public class AiSearchController : ControllerBase
 
     private static PluginConfiguration Config => Plugin.Instance!.Configuration;
 
-    private static bool IsDirect => string.Equals(Config.Mode, "direct", StringComparison.OrdinalIgnoreCase);
+    private static bool IsRemoteRetrieval =>
+        string.Equals(Config.RetrievalMode, "remote", StringComparison.OrdinalIgnoreCase);
 
     private static string ClientVersion =>
         typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "0";
 
-    private static bool Configured(PluginConfiguration c) => IsDirect
-        ? !string.IsNullOrWhiteSpace(c.DirectApiKey) && !string.IsNullOrWhiteSpace(c.DirectEndpointUrl)
-        : !string.IsNullOrWhiteSpace(c.ApiKey) && !string.IsNullOrWhiteSpace(c.PlatformApiUrl);
+    // Configured needs a chat endpoint (always) plus, for remote retrieval, a
+    // search endpoint. Local retrieval always has the catalog fallback, so it
+    // needs nothing beyond chat.
+    private static bool Configured(PluginConfiguration c) =>
+        !string.IsNullOrWhiteSpace(c.ChatEndpointUrl)
+        && (!string.Equals(c.RetrievalMode, "remote", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrWhiteSpace(c.SearchEndpointUrl));
 
     /// <summary>Serves the injected web-client script (no auth; contains no secrets).</summary>
     [HttpGet("ClientScript")]
@@ -161,7 +165,7 @@ public class AiSearchController : ControllerBase
         {
             enabled = c.Enabled,
             configured = Configured(c),
-            mode = IsDirect ? "direct" : "platform",
+            mode = IsRemoteRetrieval ? "remote" : "local",
             model = c.Model,
             maxResults = c.MaxResults
         });
@@ -174,18 +178,35 @@ public class AiSearchController : ControllerBase
     {
         var c = Config;
         Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
-        if (!Configured(c))
+        return await ListModelsAsync(c.ModelsEndpointUrl, c.ChatApiKey, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Proxies the embedding-model list for the local-index dropdown.</summary>
+    [HttpGet("EmbeddingModels")]
+    [Authorize(AuthenticationSchemes = "CustomAuthentication")]
+    public async Task<ActionResult> EmbeddingModels(CancellationToken cancellationToken)
+    {
+        var c = Config;
+        Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+        // A dedicated embedding-models URL when set, otherwise the main models
+        // list (the user picks the embedding model from all of them).
+        var url = string.IsNullOrWhiteSpace(c.EmbeddingModelsEndpointUrl) ? c.ModelsEndpointUrl : c.EmbeddingModelsEndpointUrl;
+        var key = string.IsNullOrWhiteSpace(c.EmbeddingApiKey) ? c.ChatApiKey : c.EmbeddingApiKey;
+        return await ListModelsAsync(url, key, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ActionResult> ListModelsAsync(string endpointUrl, string apiKey, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(endpointUrl))
         {
+            // No listing endpoint: the dashboard just keeps the typed model id.
             return Ok(new { data = Array.Empty<object>() });
         }
 
-        var (baseUrl, key, path) = IsDirect
-            ? (c.DirectEndpointUrl, c.DirectApiKey, "/v1/models")
-            : (c.PlatformApiUrl, c.ApiKey, "/api/media/models");
         try
         {
-            using var client = CreateClient(c, key);
-            using var resp = await client.GetAsync(Combine(baseUrl, path), cancellationToken).ConfigureAwait(false);
+            using var client = CreateClient(Config, apiKey);
+            using var resp = await client.GetAsync(endpointUrl.Trim(), cancellationToken).ConfigureAwait(false);
             var body = await resp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
@@ -317,15 +338,10 @@ public class AiSearchController : ControllerBase
                    string.Equals(e.Prompt, historyPrompt, StringComparison.Ordinal))?.Id
                ?? Guid.NewGuid().ToString("N"));
 
-        if (!IsDirect)
-        {
-            return await RecommendPlatform(c, modelPrompt, locale, maxResults, user.Username, userId, includeWatched, isTv, historyPrompt, mode, record, conversationId, request.ExcludeItemIds, cancellationToken).ConfigureAwait(false);
-        }
-
-        // Direct mode: one pass over the user's library view gathers the
-        // watch-filtered pool plus taste signals (captures the untyped `user`
-        // so we never name the Jellyfin user-entity type across versions).
-        // `movies` holds the scope's items — movies, or TV series + episodes.
+        // One unified flow for both retrieval modes: a single pass over the user's
+        // library view gathers the watch-filtered pool plus taste signals (captures
+        // the untyped `user` so we never name the Jellyfin user-entity type across
+        // versions). `movies` holds the scope's items, movies, or TV series + episodes.
         var scopeKinds = isTv
             ? new[] { BaseItemKind.Series, BaseItemKind.Episode }
             : new[] { BaseItemKind.Movie };
@@ -373,7 +389,7 @@ public class AiSearchController : ControllerBase
 
         // Surprise mode skips the semantic index (there is no query to match)
         // and hands the model a broad random slice to pick delightful picks from.
-        // For TV scope, restrict to series — surprising the user with a single
+        // For TV scope, restrict to series, surprising the user with a single
         // episode rather than a show to watch isn't the point of the feature.
         List<BaseItem>? candidates;
         bool usedSemantic;
@@ -390,9 +406,12 @@ public class AiSearchController : ControllerBase
         }
         else
         {
-            // Prefer the semantic index; fall back to catalog selection when it is
-            // not built/configured or the embedding call fails.
-            candidates = await SemanticCandidatesAsync(c, modelPrompt, movies, playedById, includeWatched, exclude, isTv, cancellationToken).ConfigureAwait(false);
+            // Retrieval source: a remote search endpoint, or the local semantic
+            // index. Either returns candidate items; both fall back to a catalog
+            // slice when unavailable (not configured, or the call/embedding fails).
+            candidates = IsRemoteRetrieval
+                ? await RemoteSearchAsync(c, modelPrompt, movies, playedById, includeWatched, exclude, isTv, userId, user.Username, cancellationToken).ConfigureAwait(false)
+                : await SemanticCandidatesAsync(c, modelPrompt, movies, playedById, includeWatched, exclude, isTv, cancellationToken).ConfigureAwait(false);
             usedSemantic = candidates is not null;
             candidates ??= CandidateSelector.Select(pool, c.SelectionStrategy, Math.Max(10, c.MaxCatalogItems));
         }
@@ -413,7 +432,7 @@ public class AiSearchController : ControllerBase
             MaybeRefreshProfile(c, userId, favorites, watched, locale);
         }
 
-        return await RecommendDirect(c, modelPrompt, locale, maxResults, enriched, favorites, watched, usedSemantic, userId, historyPrompt, mode, record, conversationId, profileText, cancellationToken).ConfigureAwait(false);
+        return await RunRecommendation(c, modelPrompt, locale, maxResults, enriched, favorites, watched, usedSemantic, userId, historyPrompt, mode, record, conversationId, profileText, cancellationToken).ConfigureAwait(false);
     }
 
     // Regenerates the taste profile in the background when it is missing, older
@@ -442,7 +461,7 @@ public class AiSearchController : ControllerBase
             try
             {
                 var messages = PromptBuilder.BuildTasteProfileMessages(favs, seen, locale);
-                var text = CleanProfileText(await _directChat.CompleteAsync(c, messages, CancellationToken.None).ConfigureAwait(false) ?? string.Empty);
+                var text = CleanProfileText(await _directChat.CompleteAsync(c, c.ChatEndpointUrl, c.ChatApiKey, c.Model, messages, CancellationToken.None).ConfigureAwait(false) ?? string.Empty);
                 if (text.Length > 0)
                 {
                     _taste.Save(userId, new TasteProfile
@@ -574,24 +593,31 @@ public class AiSearchController : ControllerBase
         return best;
     }
 
-    // --- Platform mode: the platform does the semantic search. ---
-    private async Task<ActionResult> RecommendPlatform(
-        PluginConfiguration c, string prompt, string locale, int maxResults, string userName, Guid userId, bool includeWatched, bool isTv, string historyPrompt, string mode, bool record, string conversationId, string[]? excludeItemIds, CancellationToken cancellationToken)
+    // Remote retrieval: a search endpoint returns ranked itemIds for the query; we
+    // map them back to the user's own library items (enforcing per-user visibility)
+    // and let the model pick locally, the same flow as the local index, different
+    // source. Returns null on any failure so the caller falls back to a catalog slice.
+    private async Task<List<BaseItem>?> RemoteSearchAsync(
+        PluginConfiguration c,
+        string prompt,
+        IReadOnlyList<BaseItem> movies,
+        Dictionary<Guid, bool> playedById,
+        bool includeWatched,
+        HashSet<Guid> exclude,
+        bool isTv,
+        Guid userId,
+        string userName,
+        CancellationToken cancellationToken)
     {
+        var maxRetrieve = Math.Clamp(c.MaxRetrieve, 1, 200);
         var payload = new
         {
-            prompt,
-            model = string.IsNullOrWhiteSpace(c.Model) ? null : c.Model,
-            maxResults,
-            maxRetrieve = c.MaxRetrieve,
-            includeWatched,
+            query = prompt,
             scope = isTv ? "tv" : "movies",
-            locale,
-            conversationId,
-            // Already-shown ids so a "see more" returns fresh picks instead of
-            // repeating the first page (empty on the first page). Without this the
-            // platform re-ran the identical search and returned the same results.
-            excludeItemIds = excludeItemIds ?? Array.Empty<string>(),
+            // Over-fetch so per-user visibility + watched filtering still leave enough.
+            maxResults = maxRetrieve * 3,
+            includeWatched,
+            excludeItemIds = exclude.Select(g => g.ToString("N")).ToArray(),
             user = new { id = userId.ToString("N"), name = userName },
             client = new { name = "jellyfin-ai-search", version = ClientVersion }
         };
@@ -599,79 +625,80 @@ public class AiSearchController : ControllerBase
         string raw;
         try
         {
-            using var client = CreateClient(c, c.ApiKey);
+            using var client = CreateClient(c, c.SearchApiKey);
             using var resp = await client
-                .PostAsJsonAsync(Combine(c.PlatformApiUrl, "/api/media/recommend"), payload, cancellationToken)
+                .PostAsJsonAsync(c.SearchEndpointUrl.Trim(), payload, cancellationToken)
                 .ConfigureAwait(false);
             raw = await resp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
-                _logger.LogWarning("AiSearch: platform returned {Status}: {Body}", (int)resp.StatusCode, Trunc(raw, 300));
-                return StatusCode((int)resp.StatusCode == 503 ? 503 : 502, new { error = "AI service error." });
+                _logger.LogWarning("AiSearch: search endpoint returned {Status}: {Body}", (int)resp.StatusCode, Trunc(raw, 300));
+                return null;
             }
-        }
-        catch (TaskCanceledException)
-        {
-            return StatusCode(504, new { error = "AI service timed out." });
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "AiSearch: platform call failed.");
-            return StatusCode(502, new { error = "AI service unavailable." });
+            _logger.LogWarning(ex, "AiSearch: search endpoint call failed.");
+            return null;
         }
 
+        List<Guid> ids;
         try
         {
             using var doc = JsonDocument.Parse(raw);
-            var root = doc.RootElement;
-            var answer = GetString(root, "answer");
-            var model = GetString(root, "model") ?? c.Model;
-            var usedProfile = root.TryGetProperty("usedProfile", out var up) && up.ValueKind == JsonValueKind.True;
-            var items = new List<HistoryItem>();
-            if (root.TryGetProperty("recommendations", out var recs) && recs.ValueKind == JsonValueKind.Array)
+            if (!doc.RootElement.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
             {
-                foreach (var rec in recs.EnumerateArray())
-                {
-                    var itemId = GetString(rec, "itemId");
-                    if (string.IsNullOrEmpty(itemId))
-                    {
-                        continue;
-                    }
+                return null;
+            }
 
-                    items.Add(new HistoryItem
-                    {
-                        ItemId = itemId,
-                        Title = GetString(rec, "title"),
-                        Year = rec.TryGetProperty("year", out var y) && y.ValueKind == JsonValueKind.Number ? y.GetInt32() : (int?)null,
-                        Reason = GetString(rec, "reason")
-                    });
-                    if (items.Count >= maxResults)
-                    {
-                        break;
-                    }
+            ids = new List<Guid>(results.GetArrayLength());
+            foreach (var r in results.EnumerateArray())
+            {
+                if (Guid.TryParse(GetString(r, "itemId"), out var g))
+                {
+                    ids.Add(g);
                 }
             }
-
-            if (record)
-            {
-                RecordHistory(userId, conversationId, historyPrompt, mode, answer ?? string.Empty, items);
-            }
-            else
-            {
-                AppendHistory(userId, historyPrompt, mode, items);
-            }
-
-            return Ok(new { answer, model, usedProfile, results = ToResults(items) });
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "AiSearch: unexpected platform response: {Body}", Trunc(raw, 300));
-            return StatusCode(502, new { error = "Unexpected AI response." });
+            _logger.LogWarning(ex, "AiSearch: unexpected search response: {Body}", Trunc(raw, 300));
+            return null;
         }
+
+        // Intersect with the user's own item list (visibility) and apply the same
+        // exclude/watched filtering the local path uses.
+        var byId = new Dictionary<Guid, BaseItem>(movies.Count);
+        foreach (var item in movies)
+        {
+            byId.TryAdd(item.Id, item);
+        }
+
+        var picked = new List<BaseItem>(maxRetrieve);
+        foreach (var id in ids)
+        {
+            if (!byId.TryGetValue(id, out var item) || exclude.Contains(id))
+            {
+                continue;
+            }
+
+            if (!includeWatched && playedById.TryGetValue(id, out var played) && played)
+            {
+                continue;
+            }
+
+            picked.Add(item);
+            if (picked.Count >= maxRetrieve)
+            {
+                break;
+            }
+        }
+
+        return picked.Count > 0 ? picked : null;
     }
 
-    // --- Direct mode: candidates in, OpenAI-compatible completion out. ---
-    private async Task<ActionResult> RecommendDirect(
+    // --- The model call: candidate list in, chosen recommendations out. ---
+    private async Task<ActionResult> RunRecommendation(
         PluginConfiguration c, string prompt, string locale, int maxResults, List<CandidateMovie> candidates, List<string> favorites, List<string> watched, bool usedSemantic, Guid userId, string historyPrompt, string mode, bool record, string conversationId, string? tasteProfile, CancellationToken cancellationToken)
     {
         if (candidates.Count == 0)
@@ -686,7 +713,7 @@ public class AiSearchController : ControllerBase
         string content;
         try
         {
-            content = await _directChat.CompleteAsync(c, messages, cancellationToken).ConfigureAwait(false);
+            content = await _directChat.CompleteAsync(c, c.ChatEndpointUrl, c.ChatApiKey, c.Model, messages, cancellationToken).ConfigureAwait(false);
         }
         catch (TaskCanceledException)
         {
@@ -747,31 +774,37 @@ public class AiSearchController : ControllerBase
     /// <summary>
     /// Returns a few model-generated multiple-choice questions tailored to the
     /// caller's initial prompt, for the "Help me choose" flow. Degrades to an
-    /// empty list (client falls back to its generic questions) when direct mode
-    /// is off, nothing is configured, no prompt is given, or the model fails.
+    /// empty list (client falls back to its generic questions) when disabled,
+    /// nothing is configured, no prompt is given, or the model fails.
     /// </summary>
     [HttpPost("Interview")]
     [Authorize(AuthenticationSchemes = "CustomAuthentication")]
     public async Task<ActionResult> Interview([FromBody] InterviewRequest request, CancellationToken cancellationToken)
     {
         var c = Config;
-        if (!c.Enabled || !IsDirect || !Configured(c) || request is null || string.IsNullOrWhiteSpace(request.Prompt))
+        // "Help me choose" asks the chat model for questions tailored to the typed
+        // prompt. Needs only the chat endpoint (same one recommendations use);
+        // unconfigured/disabled/empty-prompt degrade to the generic client-side quiz.
+        if (!c.Enabled || !Configured(c) || request is null || string.IsNullOrWhiteSpace(request.Prompt))
         {
             return Ok(new { questions = Array.Empty<object>() });
         }
 
-        if (GetUserId() == Guid.Empty)
+        var userId = GetUserId();
+        if (userId == Guid.Empty)
         {
             return Unauthorized();
         }
 
         var locale = string.Equals(request.Locale, "fr", StringComparison.OrdinalIgnoreCase) ? "fr" : "en";
         var messages = PromptBuilder.BuildInterviewMessages(request.Prompt!.Trim(), locale);
+        // Interview is a small request; an optional cheaper model can serve it (defaults to Model).
+        var interviewModel = string.IsNullOrWhiteSpace(c.InterviewModel) ? c.Model : c.InterviewModel;
 
         string content;
         try
         {
-            content = await _directChat.CompleteAsync(c, messages, cancellationToken).ConfigureAwait(false);
+            content = await _directChat.CompleteAsync(c, c.ChatEndpointUrl, c.ChatApiKey, interviewModel, messages, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -795,7 +828,7 @@ public class AiSearchController : ControllerBase
 
         // Project to lowercase-keyed anonymous objects: Jellyfin serializes real
         // classes as PascalCase, but the web client reads camelCase (h.mode,
-        // it.itemId, …) — matching the Recommend results shape.
+        // it.itemId, ...), matching the Recommend results shape.
         var entries = _history.Load(userId).Select(e => new
         {
             id = e.Id,
@@ -1032,7 +1065,7 @@ public class AiSearchController : ControllerBase
             }
             catch (JsonException)
             {
-                // Not JSON after all — fall through and use the raw text.
+                // Not JSON after all, fall through and use the raw text.
             }
         }
 
@@ -1075,15 +1108,13 @@ public class AiSearchController : ControllerBase
         return client;
     }
 
-    private static string Combine(string baseUrl, string path) => baseUrl.TrimEnd('/') + path;
-
     private static string? GetString(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private static string TitleYear(BaseItem item) =>
         item.ProductionYear is > 0 ? item.Name + " (" + item.ProductionYear + ")" : item.Name;
 
-    // Episodes read better as "Series — S02E05 — Title" than a bare episode name.
+    // Episodes read better as "Series, S02E05, Title" than a bare episode name.
     private static string? DisplayTitle(BaseItem item) =>
         item is Episode episode ? DocumentBuilder.EpisodeLabel(episode) : item.Name;
 

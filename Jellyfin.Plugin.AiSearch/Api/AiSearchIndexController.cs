@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.AiSearch.Search;
@@ -69,7 +70,7 @@ public class AiSearchIndexController : ControllerBase
         var lastRun = _builder.LastRun;
         return new
         {
-            enabled = config.SemanticEnabled,
+            enabled = string.Equals(config.RetrievalMode, "local", StringComparison.OrdinalIgnoreCase),
             configured = target is not null,
             model = target?.Model,
             entries = snapshot?.Entries.Count ?? 0,

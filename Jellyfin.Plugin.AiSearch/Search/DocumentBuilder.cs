@@ -12,7 +12,7 @@ namespace Jellyfin.Plugin.AiSearch.Search;
 
 /// <summary>
 /// Turns a movie, series, or episode into the text that gets embedded: title,
-/// genres, tags, director + lead cast, and the overview — so thematic queries
+/// genres, tags, director + lead cast, and the overview, so thematic queries
 /// ("films about Native Americans", "the episode where they go to space") have
 /// material to match beyond the title.
 /// </summary>
@@ -71,7 +71,7 @@ public class DocumentBuilder
         return string.Join(" ", parts);
     }
 
-    /// <summary>A human label for an episode: "Series — S02E05 — Title".</summary>
+    /// <summary>A human label for an episode: "Series, S02E05, Title".</summary>
     /// <param name="episode">The episode.</param>
     /// <returns>The display label.</returns>
     public static string EpisodeLabel(Episode episode)
@@ -81,7 +81,7 @@ public class DocumentBuilder
             : null;
         var series = string.IsNullOrWhiteSpace(episode.SeriesName) ? null : episode.SeriesName;
         var title = string.IsNullOrWhiteSpace(episode.Name) ? null : episode.Name;
-        return string.Join(" — ", new[] { series, code, title }.Where(p => p is not null));
+        return string.Join(", ", new[] { series, code, title }.Where(p => p is not null));
     }
 
     private string BuildEpisodeText(Episode episode)
@@ -111,7 +111,7 @@ public class DocumentBuilder
     /// <summary>
     /// Content hash for change detection. It covers the document text plus the
     /// model and document prefix, so switching either re-embeds everything on
-    /// the next build — stale vectors can never linger.
+    /// the next build, stale vectors can never linger.
     /// </summary>
     /// <param name="text">The document text from <see cref="BuildText"/>.</param>
     /// <param name="model">The embedding model id.</param>

@@ -14,9 +14,8 @@
                         <h2 class="sectionTitle">AI Search &amp; Recommendation</h2>
                     </div>
                     <p class="fieldDescription">
-                        Adds an AI search bar to the web client that recommends movies from your own library.
-                        <b>Platform</b> mode routes through a self-hosted AI platform that keeps a semantic index of your library;
-                        <b>Direct</b> mode calls any OpenAI-compatible endpoint (OpenAI, Ollama, OpenRouter, …) itself.
+                        Adds an AI search bar to the web client that recommends titles from your own library.
+                        Set a language model and a retrieval source below.
                     </p>
                 </div>
 
@@ -27,73 +26,108 @@
                     </label>
                 </div>
 
+                <!-- 1. Language model -->
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">1. Language model</h3>
+                    <p class="fieldDescription">
+                        The AI that reads your request and picks titles. Any OpenAI-compatible chat endpoint works
+                        (OpenAI, Ollama, OpenRouter, LiteLLM...), or a platform's <code>/api/media/chat</code>. Always required.
+                    </p>
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="text" id="ChatEndpointUrl" label="Chat endpoint URL" />
+                    <div class="fieldDescription">
+                        The complete URL. No path is appended. Examples:
+                        <code>https://api.openai.com/v1/chat/completions</code>,
+                        <code>http://localhost:11434/v1/chat/completions</code> (Ollama),
+                        <code>https://ai.example.com/api/media/chat</code>.
+                    </div>
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="password" id="ChatApiKey" label="Chat API key" autocomplete="off" />
+                    <div class="fieldDescription">Bearer token for the endpoint. Leave blank if it needs none (e.g. local Ollama).</div>
+                </div>
                 <div class="selectContainer">
-                    <select is="emby-select" id="Mode" label="Mode">
-                        <option value="platform">Platform (self-hosted semantic search)</option>
-                        <option value="direct">Direct (OpenAI-compatible endpoint)</option>
+                    <select is="emby-select" id="Model" label="Model"></select>
+                    <div class="fieldDescription" id="ModelHint">Set the models endpoint below, then Reload models.</div>
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="text" id="ModelsEndpointUrl" label="Models endpoint URL (optional)" />
+                    <div class="fieldDescription">
+                        Lists available models for the dropdown, e.g. <code>.../v1/models</code> or <code>.../api/media/models</code>.
+                        Leave blank to just type the model id above.
+                    </div>
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="text" id="InterviewModel" label="&quot;Help me choose&quot; model (optional)" />
+                    <div class="fieldDescription">A cheaper model for the short "Help me choose" questions. Blank reuses the model above.</div>
+                </div>
+
+                <!-- 2. Retrieval -->
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">2. Retrieval source</h3>
+                </div>
+                <div class="selectContainer">
+                    <select is="emby-select" id="RetrievalMode" label="Retrieval source">
+                        <option value="local">Local index (built on this server)</option>
+                        <option value="remote">Remote service</option>
                     </select>
                 </div>
 
-                <div id="platformFields">
+                <div id="remoteFields">
+                    <p class="fieldDescription">
+                        A service embeds your query and returns candidate titles from an index it maintains.
+                        <b>Steps:</b> (1) point Search endpoint at the service; (2) paste its API key; (3) make sure the
+                        service has indexed your library. Nothing is built or stored on this server.
+                    </p>
                     <div class="inputContainer">
-                        <input is="emby-input" type="text" id="PlatformApiUrl" label="Platform API URL" />
-                        <div class="fieldDescription">Your platform's API base URL (a host this Jellyfin server can reach), e.g. https://api.example.com</div>
+                        <input is="emby-input" type="text" id="SearchEndpointUrl" label="Search endpoint URL" />
+                        <div class="fieldDescription">Returns ranked candidates for a query (no model call), e.g. <code>https://ai.example.com/api/media/search</code>.</div>
                     </div>
                     <div class="inputContainer">
-                        <input is="emby-input" type="password" id="ApiKey" label="Application API key" autocomplete="off" />
-                        <div class="fieldDescription">Bearer token issued on the platform's Applications page.</div>
+                        <input is="emby-input" type="password" id="SearchApiKey" label="Search API key" autocomplete="off" />
                     </div>
                 </div>
 
-                <div id="directFields">
-                    <div class="inputContainer">
-                        <input is="emby-input" type="text" id="DirectEndpointUrl" label="OpenAI-compatible endpoint URL" />
-                        <div class="fieldDescription">e.g. https://api.openai.com, http://localhost:11434 (Ollama), or an OpenRouter URL.</div>
-                    </div>
-                    <div class="inputContainer">
-                        <input is="emby-input" type="password" id="DirectApiKey" label="Endpoint API key" autocomplete="off" />
-                    </div>
-
-                    <div class="verticalSection">
-                        <h3 class="sectionTitle">Semantic index</h3>
-                        <p class="fieldDescription">
-                            Builds a local embedding index of your movies so search retrieves by meaning
-                            instead of sending a slice of the catalog. The index refreshes nightly
-                            (Scheduled Tasks &rarr; "Build AI Search index") and only re-embeds what changed.
-                        </p>
-                    </div>
-                    <div class="checkboxContainer checkboxContainer-withDescription">
-                        <label>
-                            <input is="emby-checkbox" type="checkbox" id="SemanticEnabled" />
-                            <span>Use semantic retrieval (recommended)</span>
-                        </label>
-                    </div>
+                <div id="localFields">
+                    <p class="fieldDescription">
+                        The plugin builds its own embedding index of your library on this server and queries it.
+                        <b>Steps:</b> (1) set an embeddings endpoint + model; (2) Save; (3) click "Build index now"
+                        (or wait for the nightly Scheduled Task "Build AI Search index"). Until it's built, a plain
+                        catalog slice is used as a fallback.
+                    </p>
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label>
                             <input is="emby-checkbox" type="checkbox" id="IndexTvShows" />
                             <span>Also index TV shows &amp; episodes</span>
                         </label>
                         <div class="fieldDescription">
-                            Enables the "TV Shows" search scope by embedding your series and every
-                            episode too. Episode counts can be large, so the first build after enabling
+                            Enables the "TV Shows" scope. Episode counts can be large, so the first build after enabling
                             this may run for a while. Rebuild the index after changing it.
                         </div>
                     </div>
                     <div class="inputContainer">
-                        <input is="emby-input" type="text" id="EmbeddingModel" label="Embedding model" />
-                        <div class="fieldDescription">e.g. bge-m3 (Ollama, multilingual) or text-embedding-3-small (OpenAI). Empty disables the index.</div>
+                        <input is="emby-input" type="text" id="EmbeddingEndpointUrl" label="Embeddings endpoint URL" />
+                        <div class="fieldDescription">An OpenAI-compatible <code>.../v1/embeddings</code> URL. Blank disables the index.</div>
                     </div>
                     <div class="inputContainer">
-                        <input is="emby-input" type="text" id="EmbeddingEndpointUrl" label="Embedding endpoint URL (optional)" />
-                        <div class="fieldDescription">Leave empty to reuse the endpoint above. Set it when your chat provider has no /v1/embeddings (e.g. OpenRouter).</div>
+                        <input is="emby-input" type="password" id="EmbeddingApiKey" label="Embeddings API key (optional)" autocomplete="off" />
+                        <div class="fieldDescription">Leave blank for local Ollama.</div>
+                    </div>
+                    <div class="selectContainer">
+                        <select is="emby-select" id="EmbeddingModel" label="Embedding model"></select>
+                        <div class="fieldDescription" id="EmbeddingModelHint">Set the embeddings endpoint, then Reload embedding models.</div>
                     </div>
                     <div class="inputContainer">
-                        <input is="emby-input" type="password" id="EmbeddingApiKey" label="Embedding API key (optional)" autocomplete="off" />
-                        <div class="fieldDescription">Leave empty to reuse the key above. Local Ollama needs none.</div>
+                        <input is="emby-input" type="text" id="EmbeddingModelsEndpointUrl" label="Embedding models endpoint URL (optional)" />
+                        <div class="fieldDescription">Lists embedding models for the dropdown, e.g. <code>.../v1/models</code> or <code>.../api/media/models?capability=embedding</code>. Blank reuses the main models endpoint.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <button is="emby-button" type="button" id="ReloadEmbeddingModels" class="raised"><span>Reload embedding models</span></button>
                     </div>
                     <div class="inputContainer">
                         <input is="emby-input" type="text" id="EmbeddingQueryPrefix" label="Query prefix (model-specific, optional)" />
-                        <div class="fieldDescription">Only for models that require one, e.g. "search_query: " for nomic-embed-text. bge-m3: leave empty.</div>
+                        <div class="fieldDescription">Only for models that require one, e.g. "search_query: " for nomic-embed-text. bge-m3: leave blank.</div>
                     </div>
                     <div class="inputContainer">
                         <input is="emby-input" type="text" id="EmbeddingDocumentPrefix" label="Document prefix (model-specific, optional)" />
@@ -106,14 +140,14 @@
                     </div>
 
                     <div class="verticalSection">
-                        <h3 class="sectionTitle">Fallback (no index)</h3>
-                        <p class="fieldDescription">Used until the index is built, or when embeddings fail.</p>
+                        <h4 class="sectionTitle">Fallback (until the index is built)</h4>
+                        <p class="fieldDescription">Used until the local index exists, or if embeddings fail.</p>
                     </div>
                     <div class="inputContainer">
-                        <input is="emby-input" type="number" id="MaxCatalogItems" label="Candidate movies sent to the model" min="10" max="2000" />
+                        <input is="emby-input" type="number" id="MaxCatalogItems" label="Candidate titles sent to the model" min="10" max="2000" />
                     </div>
                     <div class="selectContainer">
-                        <select is="emby-select" id="SelectionStrategy" label="How candidates are chosen">
+                        <select is="emby-select" id="SelectionStrategy" label="How fallback candidates are chosen">
                             <option value="top">Top rated</option>
                             <option value="random">Random sample</option>
                             <option value="mix">Mix (half top, half random)</option>
@@ -121,32 +155,27 @@
                     </div>
                 </div>
 
+                <!-- 3. Options -->
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">3. Options</h3>
+                </div>
                 <div class="inputContainer">
-                    <input is="emby-input" type="number" id="MaxRetrieve" label="Candidates retrieved per query (semantic)" min="1" max="200" />
-                    <div class="fieldDescription">How many semantically-matched movies the model chooses from (platform mode, or direct mode with the index).</div>
+                    <input is="emby-input" type="number" id="MaxRetrieve" label="Candidates retrieved per query" min="1" max="200" />
+                    <div class="fieldDescription">How many shortlisted titles the model chooses from (local index and remote search).</div>
                 </div>
-
-                <div class="selectContainer">
-                    <select is="emby-select" id="Model" label="Model"></select>
-                    <div class="fieldDescription" id="ModelHint">Loaded from the configured endpoint.</div>
-                </div>
-
                 <div class="inputContainer">
                     <input is="emby-input" type="number" id="MaxResults" label="Max results" min="1" max="24" />
                 </div>
-
                 <div class="inputContainer">
                     <input is="emby-input" type="number" id="SynopsisMaxLength" label="Synopsis characters per candidate (0 = no limit)" min="0" max="5000" />
-                    <div class="fieldDescription">Caps how much of each candidate's synopsis is sent to the model. 0 sends the full synopsis uncropped.</div>
+                    <div class="fieldDescription">Caps how much of each candidate's synopsis is sent to the model. 0 sends the full synopsis.</div>
                 </div>
-
                 <div class="checkboxContainer checkboxContainer-withDescription">
                     <label>
                         <input is="emby-checkbox" type="checkbox" id="IncludeWatched" />
-                        <span>Include movies you've already watched</span>
+                        <span>Include titles you've already watched</span>
                     </label>
                 </div>
-
                 <div class="inputContainer">
                     <input is="emby-input" type="number" id="TimeoutSeconds" label="Request timeout (seconds)" min="5" max="120" />
                 </div>
@@ -168,24 +197,24 @@
             var AiSearchPluginId = "d0a3f1e6-9c2b-4a7d-8e5f-1b2c3d4e5f6a";
             var page;
 
-            function applyMode() {
-                var mode = page.querySelector('#Mode').value;
-                page.querySelector('#platformFields').style.display = mode === 'direct' ? 'none' : '';
-                page.querySelector('#directFields').style.display = mode === 'direct' ? '' : 'none';
+            function applyRetrievalMode() {
+                var mode = page.querySelector('#RetrievalMode').value;
+                page.querySelector('#remoteFields').style.display = mode === 'remote' ? '' : 'none';
+                page.querySelector('#localFields').style.display = mode === 'remote' ? 'none' : '';
             }
 
-            function loadModels(selected) {
-                var sel = page.querySelector('#Model');
-                var hint = page.querySelector('#ModelHint');
-                var btn = page.querySelector('#ReloadModels');
+            function populateSelect(apiPath, selId, hintId, btnId, selected) {
+                var sel = page.querySelector(selId);
+                var hint = page.querySelector(hintId);
+                var btn = page.querySelector(btnId);
                 if (btn) { btn.disabled = true; }
-                hint.textContent = 'Loading models…';
-                ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl('AiSearch/Models', { _: new Date().getTime() }), dataType: 'json' }).then(function (res) {
+                hint.textContent = 'Loading models...';
+                return ApiClient.ajax({ type: 'GET', url: ApiClient.getUrl(apiPath, { _: new Date().getTime() }), dataType: 'json' }).then(function (res) {
                     var list = (res && res.data) ? res.data : [];
                     if (!list.length) {
                         hint.textContent = res && res.error
                             ? 'No models returned: ' + res.error
-                            : 'No models returned. Save the URL/key, then Reload models.';
+                            : 'No models listed. Set an endpoint and Save, then reload.';
                         if (selected) { sel.innerHTML = '<option value="' + selected + '">' + selected + '</option>'; sel.value = selected; }
                         if (btn) { btn.disabled = false; }
                         return;
@@ -199,37 +228,47 @@
                     hint.textContent = list.length + ' models available.';
                     if (btn) { btn.disabled = false; }
                 }).catch(function () {
-                    hint.textContent = 'Could not load models (save the URL/key first, then Reload models).';
+                    hint.textContent = 'Could not load models (save the URL/key first, then reload).';
                     if (selected) { sel.innerHTML = '<option value="' + selected + '">' + selected + '</option>'; sel.value = selected; }
                     if (btn) { btn.disabled = false; }
                 });
+            }
+
+            function loadModels(selected) {
+                return populateSelect('AiSearch/Models', '#Model', '#ModelHint', '#ReloadModels', selected);
+            }
+
+            function loadEmbeddingModels(selected) {
+                return populateSelect('AiSearch/EmbeddingModels', '#EmbeddingModel', '#EmbeddingModelHint', '#ReloadEmbeddingModels', selected);
             }
 
             function loadConfig() {
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(AiSearchPluginId).then(function (cfg) {
                     page.querySelector('#Enabled').checked = cfg.Enabled;
-                    page.querySelector('#Mode').value = cfg.Mode || 'platform';
-                    page.querySelector('#PlatformApiUrl').value = cfg.PlatformApiUrl || '';
-                    page.querySelector('#ApiKey').value = cfg.ApiKey || '';
-                    page.querySelector('#MaxRetrieve').value = cfg.MaxRetrieve;
-                    page.querySelector('#DirectEndpointUrl').value = cfg.DirectEndpointUrl || '';
-                    page.querySelector('#DirectApiKey').value = cfg.DirectApiKey || '';
-                    page.querySelector('#SemanticEnabled').checked = cfg.SemanticEnabled !== false;
+                    page.querySelector('#ChatEndpointUrl').value = cfg.ChatEndpointUrl || '';
+                    page.querySelector('#ChatApiKey').value = cfg.ChatApiKey || '';
+                    page.querySelector('#ModelsEndpointUrl').value = cfg.ModelsEndpointUrl || '';
+                    page.querySelector('#InterviewModel').value = cfg.InterviewModel || '';
+                    page.querySelector('#RetrievalMode').value = cfg.RetrievalMode || 'local';
+                    page.querySelector('#SearchEndpointUrl').value = cfg.SearchEndpointUrl || '';
+                    page.querySelector('#SearchApiKey').value = cfg.SearchApiKey || '';
                     page.querySelector('#IndexTvShows').checked = cfg.IndexTvShows === true;
-                    page.querySelector('#EmbeddingModel').value = cfg.EmbeddingModel || '';
                     page.querySelector('#EmbeddingEndpointUrl').value = cfg.EmbeddingEndpointUrl || '';
                     page.querySelector('#EmbeddingApiKey').value = cfg.EmbeddingApiKey || '';
+                    page.querySelector('#EmbeddingModelsEndpointUrl').value = cfg.EmbeddingModelsEndpointUrl || '';
                     page.querySelector('#EmbeddingQueryPrefix').value = cfg.EmbeddingQueryPrefix || '';
                     page.querySelector('#EmbeddingDocumentPrefix').value = cfg.EmbeddingDocumentPrefix || '';
                     page.querySelector('#MaxCatalogItems').value = cfg.MaxCatalogItems;
                     page.querySelector('#SelectionStrategy').value = cfg.SelectionStrategy || 'top';
+                    page.querySelector('#MaxRetrieve').value = cfg.MaxRetrieve;
                     page.querySelector('#MaxResults').value = cfg.MaxResults;
                     page.querySelector('#SynopsisMaxLength').value = cfg.SynopsisMaxLength;
                     page.querySelector('#IncludeWatched').checked = cfg.IncludeWatched;
                     page.querySelector('#TimeoutSeconds').value = cfg.TimeoutSeconds;
-                    applyMode();
+                    applyRetrievalMode();
                     loadModels(cfg.Model);
+                    loadEmbeddingModels(cfg.EmbeddingModel);
                     refreshIndexStatus();
                     Dashboard.hideLoadingMsg();
                 });
@@ -240,17 +279,16 @@
                 var el = page.querySelector('#IndexStatus');
                 if (!s) { el.textContent = 'Index status: unavailable.'; return; }
                 if (!s.enabled || !s.configured) {
-                    el.textContent = 'Index status: not configured — set an embedding model (and save) to enable semantic retrieval.';
+                    el.textContent = 'Index status: not configured. Set an embedding model and endpoint, then Save, to build the local index.';
                     return;
                 }
                 var text = s.entries > 0
-                    ? 'Index: ' + s.entries + ' movies (' + (s.indexModel || s.model) + ', ' + s.dimensions + ' dims)'
+                    ? 'Index: ' + s.entries + ' items (' + (s.indexModel || s.model) + ', ' + s.dimensions + ' dims)'
                       + (s.builtAt ? ', built ' + new Date(s.builtAt).toLocaleString() : '')
-                    : 'Index: empty — click "Build index now" or run the scheduled task.';
-                if (s.building) { text += ' — building…'; }
+                    : 'Index: empty. Click "Build index now" or run the scheduled task.';
+                if (s.building) { text += ' (building...)'; }
                 if (s.lastRun && s.lastRun.error) { text += ' Last build failed: ' + s.lastRun.error; }
                 el.textContent = text;
-                // Poll while a build runs so the count updates live.
                 if (s.building && !statusTimer) {
                     statusTimer = setInterval(refreshIndexStatus, 3000);
                 } else if (!s.building && statusTimer) {
@@ -270,25 +308,27 @@
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(AiSearchPluginId).then(function (cfg) {
                     cfg.Enabled = page.querySelector('#Enabled').checked;
-                    cfg.Mode = page.querySelector('#Mode').value;
-                    cfg.PlatformApiUrl = page.querySelector('#PlatformApiUrl').value.trim();
-                    cfg.ApiKey = page.querySelector('#ApiKey').value.trim();
-                    cfg.MaxRetrieve = parseInt(page.querySelector('#MaxRetrieve').value, 10) || 40;
-                    cfg.DirectEndpointUrl = page.querySelector('#DirectEndpointUrl').value.trim();
-                    cfg.DirectApiKey = page.querySelector('#DirectApiKey').value.trim();
-                    cfg.SemanticEnabled = page.querySelector('#SemanticEnabled').checked;
+                    cfg.ChatEndpointUrl = page.querySelector('#ChatEndpointUrl').value.trim();
+                    cfg.ChatApiKey = page.querySelector('#ChatApiKey').value.trim();
+                    cfg.Model = page.querySelector('#Model').value;
+                    cfg.ModelsEndpointUrl = page.querySelector('#ModelsEndpointUrl').value.trim();
+                    cfg.InterviewModel = page.querySelector('#InterviewModel').value.trim();
+                    cfg.RetrievalMode = page.querySelector('#RetrievalMode').value;
+                    cfg.SearchEndpointUrl = page.querySelector('#SearchEndpointUrl').value.trim();
+                    cfg.SearchApiKey = page.querySelector('#SearchApiKey').value.trim();
                     cfg.IndexTvShows = page.querySelector('#IndexTvShows').checked;
-                    cfg.EmbeddingModel = page.querySelector('#EmbeddingModel').value.trim();
+                    cfg.EmbeddingModel = page.querySelector('#EmbeddingModel').value;
                     cfg.EmbeddingEndpointUrl = page.querySelector('#EmbeddingEndpointUrl').value.trim();
                     cfg.EmbeddingApiKey = page.querySelector('#EmbeddingApiKey').value.trim();
+                    cfg.EmbeddingModelsEndpointUrl = page.querySelector('#EmbeddingModelsEndpointUrl').value.trim();
                     cfg.EmbeddingQueryPrefix = page.querySelector('#EmbeddingQueryPrefix').value;
                     cfg.EmbeddingDocumentPrefix = page.querySelector('#EmbeddingDocumentPrefix').value;
                     cfg.MaxCatalogItems = parseInt(page.querySelector('#MaxCatalogItems').value, 10) || 350;
                     cfg.SelectionStrategy = page.querySelector('#SelectionStrategy').value;
-                    cfg.Model = page.querySelector('#Model').value;
-                    cfg.MaxResults = parseInt(page.querySelector('#MaxResults').value, 10) || 6;
+                    cfg.MaxRetrieve = parseInt(page.querySelector('#MaxRetrieve').value, 10) || 40;
+                    cfg.MaxResults = parseInt(page.querySelector('#MaxResults').value, 10) || 10;
                     var syn = parseInt(page.querySelector('#SynopsisMaxLength').value, 10);
-                    cfg.SynopsisMaxLength = isNaN(syn) ? 180 : syn;
+                    cfg.SynopsisMaxLength = isNaN(syn) ? 0 : syn;
                     cfg.IncludeWatched = page.querySelector('#IncludeWatched').checked;
                     cfg.TimeoutSeconds = parseInt(page.querySelector('#TimeoutSeconds').value, 10) || 45;
                     ApiClient.updatePluginConfiguration(AiSearchPluginId, cfg).then(function (r) {
@@ -303,16 +343,19 @@
                 loadConfig();
             });
             document.querySelector('#AiSearchConfigForm').addEventListener('submit', save);
-            document.querySelector('#Mode').addEventListener('change', function () { applyMode(); loadModels(page.querySelector('#Model').value); });
+            document.querySelector('#RetrievalMode').addEventListener('change', applyRetrievalMode);
             document.querySelector('#ReloadModels').addEventListener('click', function () {
                 loadModels(page.querySelector('#Model').value);
+            });
+            document.querySelector('#ReloadEmbeddingModels').addEventListener('click', function () {
+                loadEmbeddingModels(page.querySelector('#EmbeddingModel').value);
             });
             document.querySelector('#RebuildIndex').addEventListener('click', function () {
                 ApiClient.ajax({ type: 'POST', url: ApiClient.getUrl('AiSearch/RebuildIndex'), dataType: 'json' })
                     .then(renderIndexStatus)
                     .catch(function () {
                         page.querySelector('#IndexStatus').textContent =
-                            'Could not start the build — save the configuration first, then retry.';
+                            'Could not start the build. Save the configuration first, then retry.';
                     });
             });
         })();

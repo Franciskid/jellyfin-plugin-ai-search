@@ -26,7 +26,7 @@ public sealed class ParsedRecommendations
 
 /// <summary>
 /// Tolerant extraction of the strict-JSON contract from a model reply: strips
-/// code fences, slices to the outermost object, accepts string indices —
+/// code fences, slices to the outermost object, accepts string indices -
 /// models drift, users shouldn't see 502s for a stray backtick.
 /// </summary>
 public static class ModelResponseParser

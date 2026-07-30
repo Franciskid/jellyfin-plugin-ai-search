@@ -80,7 +80,7 @@
             movies: function (n) { return n + (n === 1 ? ' film' : ' films'); },
             noMatches: 'Rien dans votre bibliothèque ne correspond. Reformulez.',
             unavailable: 'La recherche IA est indisponible pour le moment.',
-            disabled: 'La recherche IA n’est pas configurée.',
+            disabled: 'La recherche IA n'est pas configurée.',
             timeout: 'Le service IA a expiré. Réessayez.',
             more: 'Plus comme ça',
             searchAgain: 'Relancer',
@@ -418,7 +418,7 @@
 
     function cacheHistory(list) { historyCache = list || []; }
 
-    // User preferences (persisted, best-effort — some webviews block storage).
+    // User preferences (persisted, best-effort, some webviews block storage).
     var prefs = { personalize: readPref('aisPersonalize', true), scope: readStr('aisScope', 'movies') };
     function readPref(key, def) {
         try { var v = window.localStorage.getItem(key); return v === null ? def : v === '1'; } catch (e) { return def; }
@@ -591,7 +591,7 @@
         if (!initial) { renderStaticInterview(); return; }
         var s = t();
         els.composer.innerHTML =
-            '<div class="ais-preparing"><div class="ais-spin"></div><span>' + esc(s.preparing) + '…</span></div>';
+            '<div class="ais-preparing"><div class="ais-spin"></div><span>' + esc(s.preparing) + '...</span></div>';
         getInterview(initial)
             .then(function (questions) {
                 if (!questions || !questions.length) { renderStaticInterview(); return; }
@@ -662,14 +662,14 @@
     function startLoader(surprise) {
         var s = t();
         var steps = surprise ? [s.surprising] : s.loading.slice();
-        els.content.innerHTML = '<div class="ais-loading"><div class="ais-spin"></div><div class="ais-loadtxt">' + esc(steps[0]) + '…</div></div>';
+        els.content.innerHTML = '<div class="ais-loading"><div class="ais-spin"></div><div class="ais-loadtxt">' + esc(steps[0]) + '...</div></div>';
         var txt = els.content.querySelector('.ais-loadtxt');
         var i = 0;
         stopLoader();
         if (steps.length > 1) {
             loadTimer = setInterval(function () {
                 i = (i + 1) % steps.length;
-                txt.textContent = steps[i] + '…';
+                txt.textContent = steps[i] + '...';
             }, 1400);
         }
     }
@@ -777,7 +777,7 @@
         if (moreBtn) {
             moreBtn.addEventListener('click', function () {
                 var shown = Array.prototype.map.call(els.content.querySelectorAll('.ais-card'), function (c) { return c.getAttribute('data-id'); });
-                moreBtn.disabled = true; moreBtn.textContent = '…';
+                moreBtn.disabled = true; moreBtn.textContent = '...';
                 recommend({ prompt: lastRun.prompt, server: lastRun.server, includeWatched: lastRun.includeWatched, excludeItemIds: shown })
                     .then(function (d) {
                         var more = (d && d.results) || [];

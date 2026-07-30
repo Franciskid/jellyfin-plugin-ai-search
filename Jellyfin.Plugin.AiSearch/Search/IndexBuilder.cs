@@ -22,7 +22,7 @@ public sealed record IndexBuildResult(DateTime StartedAt, DateTime FinishedAt, i
 /// <summary>
 /// Builds the semantic index: walk the movie library, embed what changed
 /// (content-hash), keep what didn't, then swap the in-memory index and persist
-/// it. Single-flight — a second build request while one runs is a no-op.
+/// it. Single-flight, a second build request while one runs is a no-op.
 /// </summary>
 public class IndexBuilder
 {
@@ -69,7 +69,7 @@ public class IndexBuilder
     /// Runs one build. Returns immediately (with the previous result) when a
     /// build is already in flight or semantic search is not configured.
     /// </summary>
-    /// <param name="progress">Optional progress sink (0–100), used by the scheduled task.</param>
+    /// <param name="progress">Optional progress sink (0-100), used by the scheduled task.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The build outcome.</returns>
     public async Task<IndexBuildResult?> BuildAsync(IProgress<double>? progress, CancellationToken cancellationToken)
@@ -78,7 +78,7 @@ public class IndexBuilder
         var target = EmbeddingsTarget.FromConfiguration(config);
         if (target is null)
         {
-            _logger.LogInformation("AiSearch: semantic index build skipped — no embedding model/endpoint configured.");
+            _logger.LogInformation("AiSearch: semantic index build skipped, no embedding model/endpoint configured.");
             return LastRun;
         }
 
@@ -164,7 +164,7 @@ public class IndexBuilder
         _index.Replace(snapshot);
         _store.Save(snapshot);
         _logger.LogInformation(
-            "AiSearch: semantic index built — {Embedded} embedded, {Reused} reused, {Total} total ({Model}).",
+            "AiSearch: semantic index built, {Embedded} embedded, {Reused} reused, {Total} total ({Model}).",
             pending.Count,
             entries.Count - pending.Count,
             entries.Count,

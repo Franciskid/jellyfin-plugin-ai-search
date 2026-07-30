@@ -28,24 +28,25 @@ public class DirectChatClient
     }
 
     /// <summary>Runs one completion and returns the assistant message content.</summary>
-    /// <param name="config">Plugin configuration (endpoint, key, model, timeout).</param>
+    /// <param name="config">Plugin configuration (timeout).</param>
+    /// <param name="url">The full chat-completions URL (used verbatim).</param>
+    /// <param name="apiKey">Bearer key for the endpoint (blank if none).</param>
+    /// <param name="model">The model id to request.</param>
     /// <param name="messages">The chat messages payload.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The assistant content string.</returns>
     /// <exception cref="DirectChatException">When the endpoint errors or replies with an unexpected shape.</exception>
-    public async Task<string> CompleteAsync(PluginConfiguration config, object[] messages, CancellationToken cancellationToken)
+    public async Task<string> CompleteAsync(PluginConfiguration config, string url, string apiKey, string model, object[] messages, CancellationToken cancellationToken)
     {
-        var url = config.DirectEndpointUrl.TrimEnd('/') + "/v1/chat/completions";
-
-        var (ok, status, body) = await PostAsync(config, url, messages, wantJson: true, cancellationToken).ConfigureAwait(false);
+        var (ok, status, body) = await PostAsync(config, url, apiKey, messages, model, wantJson: true, cancellationToken).ConfigureAwait(false);
         if (!ok && status == 400)
         {
-            (ok, status, body) = await PostAsync(config, url, messages, wantJson: false, cancellationToken).ConfigureAwait(false);
+            (ok, status, body) = await PostAsync(config, url, apiKey, messages, model, wantJson: false, cancellationToken).ConfigureAwait(false);
         }
 
         if (!ok)
         {
-            throw new DirectChatException($"Direct endpoint returned {status}: {Truncate(body, 300)}");
+            throw new DirectChatException($"Chat endpoint returned {status}: {Truncate(body, 300)}");
         }
 
         try
@@ -56,30 +57,32 @@ public class DirectChatClient
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException)
         {
-            throw new DirectChatException($"Unexpected direct response: {Truncate(body, 300)}");
+            throw new DirectChatException($"Unexpected chat response: {Truncate(body, 300)}");
         }
     }
 
     private async Task<(bool Ok, int Status, string Body)> PostAsync(
         PluginConfiguration config,
         string url,
+        string apiKey,
         object[] messages,
+        string model,
         bool wantJson,
         CancellationToken cancellationToken)
     {
         // max_tokens is the *combined* budget for a reasoning model's internal
         // thinking and its visible answer. 900 was too small: a reasoning model
         // (e.g. gpt-5.6-luna at high effort) spent it all thinking, hit the cap and
-        // returned empty content — an empty recommendation. 4096 leaves ample room.
+        // returned empty content, an empty recommendation. 4096 leaves ample room.
         object payload = wantJson
-            ? new { model = config.Model, temperature = 0.4, max_tokens = 4096, response_format = new { type = "json_object" }, messages }
-            : new { model = config.Model, temperature = 0.4, max_tokens = 4096, messages };
+            ? new { model, temperature = 0.4, max_tokens = 4096, response_format = new { type = "json_object" }, messages }
+            : new { model, temperature = 0.4, max_tokens = 4096, messages };
 
         using var client = _httpClientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(Math.Clamp(config.TimeoutSeconds, 5, 120));
-        if (!string.IsNullOrEmpty(config.DirectApiKey))
+        if (!string.IsNullOrEmpty(apiKey))
         {
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", config.DirectApiKey);
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         }
 
         using var response = await client.PostAsJsonAsync(url, payload, cancellationToken).ConfigureAwait(false);
