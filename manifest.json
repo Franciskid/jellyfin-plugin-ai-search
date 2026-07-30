@@ -2,12 +2,20 @@
     {
         "guid": "d0a3f1e6-9c2b-4a7d-8e5f-1b2c3d4e5f6a",
         "name": "AI Search",
-        "description": "Adds an AI search bar to the Jellyfin web client. Ask in natural language and get movies from your own library, personalized to your watch history, backed by a self-hosted AI platform or any OpenAI-compatible endpoint.",
+        "description": "Adds an AI search bar to the Jellyfin web client. Ask in natural language and get titles from your own library, personalized to your watch history. Works with any OpenAI-compatible model, with a local or remote retrieval source.",
         "overview": "AI natural-language search & recommendations from your own library.",
         "owner": "Franciskid",
         "category": "General",
         "imageUrl": "",
         "versions": [
+            {
+                "version": "1.1.0.0",
+                "changelog": "One unified setup: a chat endpoint plus a local or remote retrieval source (replaces the old Direct/Platform modes). New: search without a language model, returning retrieval matches ranked by relevance with no per-result reasons. Embedding model is now a dropdown, and endpoints are configured per capability.",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.1.0.0/ai-search_1.1.0.0.zip",
+                "checksum": "177cd1303f733800e27f4d964f5c0c41",
+                "timestamp": "2026-07-30T00:00:00Z"
+            },
             {
                 "version": "1.0.1.0",
                 "changelog": "Show more now returns new titles instead of repeating the first results. Recommendations no longer come back empty on reasoning models.",

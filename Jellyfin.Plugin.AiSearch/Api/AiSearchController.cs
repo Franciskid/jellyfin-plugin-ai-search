@@ -137,11 +137,11 @@ public class AiSearchController : ControllerBase
     private static string ClientVersion =>
         typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "0";
 
-    // Configured needs a chat endpoint (always) plus, for remote retrieval, a
-    // search endpoint. Local retrieval always has the catalog fallback, so it
-    // needs nothing beyond chat.
+    // Configured needs a chat endpoint (unless the model is disabled) plus, for
+    // remote retrieval, a search endpoint. Local retrieval always has the catalog
+    // fallback, so it needs nothing beyond the above.
     private static bool Configured(PluginConfiguration c) =>
-        !string.IsNullOrWhiteSpace(c.ChatEndpointUrl)
+        (!c.UseModel || !string.IsNullOrWhiteSpace(c.ChatEndpointUrl))
         && (!string.Equals(c.RetrievalMode, "remote", StringComparison.OrdinalIgnoreCase)
             || !string.IsNullOrWhiteSpace(c.SearchEndpointUrl));
 
@@ -414,6 +414,13 @@ public class AiSearchController : ControllerBase
                 : await SemanticCandidatesAsync(c, modelPrompt, movies, playedById, includeWatched, exclude, isTv, cancellationToken).ConfigureAwait(false);
             usedSemantic = candidates is not null;
             candidates ??= CandidateSelector.Select(pool, c.SelectionStrategy, Math.Max(10, c.MaxCatalogItems));
+        }
+
+        // Model disabled: return the retrieval matches directly, ranked as
+        // retrieved, with no model call and no per-result reason.
+        if (!c.UseModel)
+        {
+            return RetrievalOnly(candidates, maxResults, userId, historyPrompt, mode, record, conversationId);
         }
 
         // Resolve cast from live metadata only on the semantic path (≤ ~40
@@ -697,6 +704,38 @@ public class AiSearchController : ControllerBase
         return picked.Count > 0 ? picked : null;
     }
 
+    // Model disabled: the retrieved candidates, already ranked by relevance, are
+    // the results. No model call, no per-result reason, no answer summary.
+    private ActionResult RetrievalOnly(List<BaseItem> candidates, int maxResults, Guid userId, string historyPrompt, string mode, bool record, string conversationId)
+    {
+        var items = new List<HistoryItem>();
+        foreach (var item in candidates)
+        {
+            items.Add(new HistoryItem
+            {
+                ItemId = item.Id.ToString("N"),
+                Title = DisplayTitle(item),
+                Year = item.ProductionYear,
+                Reason = null
+            });
+            if (items.Count >= maxResults)
+            {
+                break;
+            }
+        }
+
+        if (record)
+        {
+            RecordHistory(userId, conversationId, historyPrompt, mode, string.Empty, items);
+        }
+        else
+        {
+            AppendHistory(userId, historyPrompt, mode, items);
+        }
+
+        return Ok(new { answer = (string?)null, model = (string?)null, usedProfile = false, results = ToResults(items) });
+    }
+
     // --- The model call: candidate list in, chosen recommendations out. ---
     private async Task<ActionResult> RunRecommendation(
         PluginConfiguration c, string prompt, string locale, int maxResults, List<CandidateMovie> candidates, List<string> favorites, List<string> watched, bool usedSemantic, Guid userId, string historyPrompt, string mode, bool record, string conversationId, string? tasteProfile, CancellationToken cancellationToken)
@@ -783,9 +822,9 @@ public class AiSearchController : ControllerBase
     {
         var c = Config;
         // "Help me choose" asks the chat model for questions tailored to the typed
-        // prompt. Needs only the chat endpoint (same one recommendations use);
-        // unconfigured/disabled/empty-prompt degrade to the generic client-side quiz.
-        if (!c.Enabled || !Configured(c) || request is null || string.IsNullOrWhiteSpace(request.Prompt))
+        // prompt. Needs the chat endpoint and the model enabled; when disabled,
+        // unconfigured, or the prompt is empty it degrades to the generic quiz.
+        if (!c.Enabled || !c.UseModel || !Configured(c) || request is null || string.IsNullOrWhiteSpace(request.Prompt))
         {
             return Ok(new { questions = Array.Empty<object>() });
         }

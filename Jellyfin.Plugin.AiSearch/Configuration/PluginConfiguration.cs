@@ -38,6 +38,14 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets the bearer key for the chat endpoint (blank if it needs none).</summary>
     public string ChatApiKey { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether a language model picks and explains
+    /// the results. When false the plugin returns the retrieval matches directly,
+    /// ranked by relevance, with no model call and no per-result reason. A chat
+    /// endpoint is then not required.
+    /// </summary>
+    public bool UseModel { get; set; } = true;
+
     /// <summary>Gets or sets the model alias/id used for recommendations.</summary>
     public string Model { get; set; } = string.Empty;
 

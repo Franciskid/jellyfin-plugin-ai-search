@@ -31,8 +31,19 @@
                     <h3 class="sectionTitle">1. Language model</h3>
                     <p class="fieldDescription">
                         The AI that reads your request and picks titles. Any OpenAI-compatible chat endpoint works
-                        (OpenAI, Ollama, OpenRouter, LiteLLM...), or a platform's <code>/api/media/chat</code>. Always required.
+                        (OpenAI, Ollama, OpenRouter, LiteLLM...), or a platform's <code>/api/media/chat</code>.
                     </p>
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="UseModel" />
+                        <span>Use a language model to pick and explain results</span>
+                    </label>
+                    <div class="fieldDescription">
+                        On: a model chooses the best matches from retrieval and writes a one-line reason for each.
+                        Off: the plugin returns the retrieval matches directly, ranked by relevance, with no reasons.
+                        Turning it off needs no chat endpoint, only a retrieval source below.
+                    </div>
                 </div>
                 <div class="inputContainer">
                     <input is="emby-input" type="text" id="ChatEndpointUrl" label="Chat endpoint URL" />
@@ -246,6 +257,7 @@
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(AiSearchPluginId).then(function (cfg) {
                     page.querySelector('#Enabled').checked = cfg.Enabled;
+                    page.querySelector('#UseModel').checked = cfg.UseModel !== false;
                     page.querySelector('#ChatEndpointUrl').value = cfg.ChatEndpointUrl || '';
                     page.querySelector('#ChatApiKey').value = cfg.ChatApiKey || '';
                     page.querySelector('#ModelsEndpointUrl').value = cfg.ModelsEndpointUrl || '';
@@ -308,6 +320,7 @@
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(AiSearchPluginId).then(function (cfg) {
                     cfg.Enabled = page.querySelector('#Enabled').checked;
+                    cfg.UseModel = page.querySelector('#UseModel').checked;
                     cfg.ChatEndpointUrl = page.querySelector('#ChatEndpointUrl').value.trim();
                     cfg.ChatApiKey = page.querySelector('#ChatApiKey').value.trim();
                     cfg.Model = page.querySelector('#Model').value;
