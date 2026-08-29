@@ -32,15 +32,12 @@ rich metadata for a small relevant set, instead of bare titles for an arbitrary 
 
 ```mermaid
 flowchart LR
-  A["Web client script<br/>(Jellyfin session)"] --> B["Plugin API"]
-  B --> C["Library pass:<br/>visibility, watched, favorites"]
-  C --> D{"Retrieval source"}
-  D -->|local| E["Vector index<br/>(in memory)"]
-  D -->|remote| F["Search endpoint"]
-  E --> G["Candidate filter<br/>+ prompt builder"]
-  F --> G
-  G --> H["Chat endpoint<br/>(strict JSON)"]
-  H --> I["Map indices back<br/>to library items"]
+  A["Query<br/>(Jellyfin session)"] --> B{"Retrieval"}
+  B -->|local| C["Vector index<br/>(in memory)"]
+  B -->|remote| D["Search endpoint"]
+  C --> E["Prompt builder<br/>+ chat model"]
+  D --> E
+  E --> F["Library items<br/>+ reasons"]
 ```
 
 1. The injected client script calls the plugin with the user's existing Jellyfin session. No API
