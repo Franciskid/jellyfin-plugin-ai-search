@@ -315,15 +315,25 @@ so one DLL loads on every 10.11.x server. Verified on 10.11.1 and 10.11.8.
 
 ## Screens
 
-<img width="586" height="672" alt="Search results with reasons" src="https://github.com/user-attachments/assets/169bac75-95a3-4e8d-ba4e-9ad173acea45" />
+**Theme query.** "american movie about american frontier"
 
-<img width="597" height="556" alt="Help me choose questions" src="https://github.com/user-attachments/assets/8c5cb127-f120-442f-95d1-819370cf4a8e" />
+<img width="588" height="698" alt="Theme query and its results" src="https://github.com/user-attachments/assets/61e6c8bf-f703-4ee3-8463-bb19ae8b0de9" />
 
-<img width="588" height="698" alt="Search panel" src="https://github.com/user-attachments/assets/61e6c8bf-f703-4ee3-8463-bb19ae8b0de9" />
+**Cast query.** One title matches, so one title comes back.
 
-<img width="593" height="538" alt="History" src="https://github.com/user-attachments/assets/a40f3314-88df-497f-8c95-3bcd54b453c7" />
+<img width="597" height="556" alt="Cast query with a single match" src="https://github.com/user-attachments/assets/8c5cb127-f120-442f-95d1-819370cf4a8e" />
+
+**Episode search.** "south park episode with cartman managing a park"
+
+<img width="593" height="538" alt="Episode search result" src="https://github.com/user-attachments/assets/a40f3314-88df-497f-8c95-3bcd54b453c7" />
+
+**Surprise me.** A varied mix from across the library.
 
 <img width="593" height="682" alt="Surprise me results" src="https://github.com/user-attachments/assets/60921318-3230-4557-9d31-ec35372b5d58" />
+
+**One reason per result.**
+
+<img width="586" height="672" alt="Results with a one-line reason each" src="https://github.com/user-attachments/assets/169bac75-95a3-4e8d-ba4e-9ad173acea45" />
 
 ## License
 
