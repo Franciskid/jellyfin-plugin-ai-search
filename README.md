@@ -1,8 +1,7 @@
 # AI Search for Jellyfin
 
-Natural-language search and recommendation over your own Jellyfin library. You describe what you
-want to watch. The plugin retrieves the closest titles from your library with an embedding index,
-then a language model picks the best ones and writes one reason for each.
+Describe what you want to watch, and the plugin searches your Jellyfin library for a match.
+It finds relevant titles, then asks a language model to pick the best ones and explain each choice.
 
 `Jellyfin 10.11` · `.NET 9` · `no database` · `any OpenAI-compatible endpoint` · `runs fully offline with Ollama`
 
@@ -20,13 +19,13 @@ then a language model picks the best ones and writes one reason for each.
 ## Why an index
 
 The first version of this plugin sent a list of titles to the model and asked it to choose. That
-approach does not scale. A library of 3000 movies does not fit in a prompt, so you send the 300
-top-rated titles, and the model cannot recommend any of the other 2700.
+limits what it can find. If you have 3000 movies but only send the 300 top-rated titles, the model
+never gets a chance to recommend the other 2700.
 
-The plugin now builds a semantic index. Each title becomes one embedding vector. The query goes
-through the same embedding model, and the plugin ranks the whole library by cosine similarity.
-Only the top 40 titles reach the language model, with their cast and synopsis. The model reads
-rich metadata for a small relevant set, instead of bare titles for an arbitrary set.
+The plugin now builds an index that lets it search by meaning. An embedding model converts each
+title's metadata into numbers that can be compared with your query. The plugin searches the whole
+index and sends the closest 40 matches to the language model, along with their cast and synopsis.
+That gives the model enough context to make useful choices.
 
 ## Pipeline
 
@@ -42,33 +41,33 @@ flowchart LR
 
 1. The injected client script calls the plugin with the user's existing Jellyfin session. No API
    key and no endpoint URL reach the browser.
-2. One pass over the caller's library view collects the candidate pool, the watch state and the
-   favorites. The pass uses the calling user's item list, so per-user visibility is applied here.
-3. Retrieval returns ranked candidates. The source is either the local vector index or a remote
-   search endpoint.
-4. The plugin drops candidates that are watched, excluded, or invisible to the caller.
+2. The plugin collects the titles the user can access, along with their watch history and
+   favorites. Jellyfin's per-user access restrictions apply here.
+3. The local index or a remote search service returns the closest matches.
+4. The plugin removes titles the user cannot access, titles already shown, and watched titles
+   unless the user has chosen to include them.
 5. The prompt builder writes one line per candidate: `index | title (year) | genres | cast | synopsis`.
 6. The model answers with strict JSON and selects candidates **by index only**. It cannot return a
    title that you do not own.
 7. The plugin maps the indices back to Jellyfin items and returns posters, titles, years and reasons.
 
-Each step has a fallback. If retrieval is unavailable, the plugin sends a catalog slice. If the
-model rejects `response_format`, the plugin repeats the request without it. If the reply arrives
-inside code fences, the parser cuts out the JSON object.
+If the index or search service is unavailable, the plugin sends a selection from the library
+instead. If the model rejects `response_format`, it retries without that option. It also handles
+JSON replies wrapped in Markdown code fences.
 
 ## Design decisions
 
 | Decision | Reason |
 |---|---|
-| Brute-force scan, no vector database | A full scan of 18000 vectors of 1024 dimensions is 18 million multiply-adds, so a query costs milliseconds in one loop. An approximate index or a database server adds an operational dependency and returns nothing at this size. |
-| Plain float loop, no SIMD package | The scan is already fast enough. A native dependency inside a plugin folder is a portability risk across the platforms Jellyfin runs on. |
+| Brute-force scan, no vector database | Searching 18000 vectors with 1024 dimensions takes milliseconds. At this library size, a separate database would add setup and maintenance without much benefit. |
+| Plain float loop, no SIMD package | The scan is already fast enough. Keeping dependencies simple makes the plugin easier to run across Jellyfin platforms. |
 | Vectors normalized once, at index time | Cosine similarity becomes a dot product. The query path does no division. |
-| One binary file in Jellyfin's data folder | The index loads at startup and survives a restart. A restart never triggers a re-embed. |
-| Immutable snapshot, swapped atomically | A rebuild replaces one reference. Readers never observe a half-built index, and no lock is needed on the query path. |
-| SHA-256 content hash per document | The nightly build re-embeds only the titles whose metadata changed. On a normal night that is zero. |
+| One binary file in Jellyfin's data folder | The index loads at startup and survives a restart. Restarting does not require rebuilding the embeddings. |
+| Immutable snapshot, swapped atomically | A rebuild replaces one reference. Searches keep using the previous index until the new one is ready. |
+| SHA-256 content hash per document | The nightly build re-embeds only the titles whose metadata changed. If nothing changed, no new embeddings are needed. |
 | The hash covers the model id and the prefix | Change the embedding model and every vector is invalidated on the next build. Vectors from two models cannot mix. |
 | The model selects by index | The model cannot invent a title. It also cannot return a title the user is not allowed to see, because the candidate list is built from that user's own item list. |
-| Retrieval failure falls back to a catalog slice | A missing index, a dead embedding endpoint or a model timeout gives worse results, not an error page. |
+| Retrieval failure falls back to a catalog slice | If the index or embedding service is unavailable, the model can still choose from a smaller selection of library titles. |
 
 **Index file format (v1):**
 
@@ -87,7 +86,7 @@ current index.
 | | |
 |---|---|
 | Index size | about 100 MB, one file |
-| Query time | milliseconds in memory. The embedding call dominates the latency |
+| Query time | milliseconds in memory. Most of the wait is for the embedding service |
 | First build, Ollama + bge-m3 on CPU | about 40 minutes |
 | First build, OpenAI `text-embedding-3-small` | a few minutes, about $0.05 |
 | Nightly incremental build | about 1 minute, usually 0 re-embeds |
@@ -100,14 +99,14 @@ current index.
 | Feature | What it does |
 |---|---|
 | **Search** | Free-text query. Matches on mood, theme, plot, cast or director. |
-| **Surprise me** | No query. The plugin sends the model a random slice of the library. Your favorites and history go into the same prompt, so the picks stay close to your taste. It surfaces titles you own and never search for. |
-| **Help me choose** | The model reads your half-typed request and writes 2 or 3 multiple-choice questions that narrow it down. Your answers go back into the search. With an empty box you receive generic questions on mood, length and watch state. |
+| **Surprise me** | No query. The plugin sends the model a random slice of the library. With personalization enabled, it also uses your favorites and history to guide the picks. Useful for finding something you would not think to search for. |
+| **Help me choose** | The model uses what you have typed to ask 2 or 3 multiple-choice questions and narrow down the search. Your answers go back into the search. With an empty box you receive generic questions on mood, length and watch state. |
 | **Create collection** | Saves the result set as a Jellyfin playlist. Any result set can also be saved after the fact. |
 | **History** | The last 12 searches per user, stored server-side. Reopen the results or replay the search. |
 | **Movies / TV switch** | Searches series *and* individual episodes. If the query names a series you own, the scan is restricted to that series. |
 | **Personalize** | Feeds favorites, watch history and a taste profile into the prompt. Turn it off for a neutral search. |
-| **Taste profile** | The model distills your favorites and history into 2 to 4 sentences. It refreshes in the background when it is more than 7 days old or your signal drifts. It is stored on your server and sent only to the backend you configured. |
-| **Retrieval only** | Turn the language model off. The plugin then returns the retrieval matches ranked by similarity, with no reasons, no chat endpoint and no token cost. |
+| **Taste profile** | The model summarizes your favorites and history in 2 to 4 sentences. The profile refreshes in the background after 7 days or when your viewing preferences change. It is stored on your server and sent only to the backend you configured. |
+| **Retrieval only** | Turn the language model off. The plugin then returns the retrieval matches ranked by similarity, without explanations or a chat model call. Embedding costs still depend on your provider. |
 
 Answers follow the web client language. French and English are detected and passed to the model.
 
@@ -123,7 +122,7 @@ Install **AI Search** from the catalog, restart Jellyfin, then open **Dashboard 
 
 ## Configure
 
-You configure two things: a chat endpoint, and a retrieval source.
+Choose a chat service to make recommendations and a search source to find matching titles.
 
 ### Fully local, with Ollama
 
@@ -151,12 +150,15 @@ Embeddings endpoint:  https://api.openai.com/v1/embeddings
 Embedding model:      text-embedding-3-small
 ```
 
-Prompts and the metadata of the 40 candidates go to OpenAI.
+OpenAI receives title metadata when the index is built. During a search, it also receives your
+query and the metadata of the selected candidates, plus favorites and history if personalization
+is enabled.
 
 ### Chat-only providers
 
-OpenRouter and similar providers serve no embeddings. Point the chat endpoint at the provider and
-the embeddings endpoint at a local Ollama. Chat goes out, embeddings stay home.
+If your chat provider does not offer embeddings, you can use a local Ollama instance for those.
+Set the chat endpoint to your provider and the embeddings endpoint to Ollama. The chat provider
+still receives your search prompt and candidate metadata.
 
 ### Remote retrieval
 
@@ -168,17 +170,16 @@ Search endpoint URL:  https://ai.your-service.example/api/media/search
 Search API key:       (issued by your service)
 ```
 
-The service owns the index and returns candidates. The plugin still runs the model call and maps
-the results back to the caller's library. Use this when a service already indexes your library, or
+The service maintains the index and returns matching titles. The plugin then calls the language
+model and checks the results against the user's library. Use this when a service already indexes your library, or
 when you need to cap usage per user centrally. The contract is at the bottom of this file.
 
 ### Which embedding model
 
-- **Not English only:** `bge-m3` on Ollama, about 1.2 GB. Multilingual, no prefix configuration.
-- **English only, hosted:** `text-embedding-3-small`. Cheap and good.
+- **Multilingual libraries:** `bge-m3` on Ollama, about 1.2 GB. Multilingual, no prefix configuration.
+- **English only, hosted:** `text-embedding-3-small`. A low-cost hosted option.
 - **`nomic-embed-text`:** works, but you must fill in the prefixes on the config page: query prefix
-  `search_query: ` and document prefix `search_document: `. Without them the results degrade into
-  noise and no error is raised anywhere.
+  `search_query: ` and document prefix `search_document: `. Missing prefixes can lead to poor results without an error message.
 
 ## Options
 
@@ -186,13 +187,13 @@ when you need to cap usage per user centrally. The contract is at the bottom of 
 
 | Option | Effect |
 |---|---|
-| Enable AI search | Master switch. Also hides the search bar in the web client. |
+| Enable AI search | Turns the feature on or off. Turning it off also hides the search bar. |
 | Use a language model | Off: return retrieval matches ranked by similarity, with no reasons. No chat endpoint is then required. |
 | Chat endpoint URL | An OpenAI-compatible chat-completions URL. Used verbatim. |
 | Chat API key | Bearer key. Leave empty if the endpoint needs none. |
-| Model | The model that picks and explains. Save the URL first, then reload the dropdown. |
+| Model | The model that chooses titles and explains its choices. Save the URL first, then reload the dropdown. |
 | Models endpoint URL | Lists models for the dropdown. Optional. OpenAI, bare-array and Ollama shapes are all accepted. |
-| "Help me choose" model | Optional cheaper model for the interview questions. |
+| "Help me choose" model | Optional separate model for the follow-up questions. |
 
 **Retrieval**
 
@@ -217,7 +218,7 @@ when you need to cap usage per user centrally. The contract is at the bottom of 
 
 | Option | Effect |
 |---|---|
-| Candidates retrieved per query | How many candidates the model chooses from. Default 40, maximum 200. Higher is broader, slower and more expensive. |
+| Candidates retrieved per query | How many candidates the model chooses from. Default 40, maximum 200. More candidates give the model more choice, but take longer and can cost more. |
 | Max results | How many recommendations come back. |
 | Include titles you already watched | Off by default. |
 | Request timeout | Seconds before the backend call is abandoned. Default 45. |
@@ -235,7 +236,7 @@ when you need to cap usage per user centrally. The contract is at the bottom of 
 | `GET /AiSearch/Models` | Session | Chat models, proxied from the models endpoint |
 | `GET /AiSearch/EmbeddingModels` | Session | Embedding models, for the config dropdown |
 | `GET /AiSearch/IndexStatus` | Admin | Index size, model, last build, last error |
-| `POST /AiSearch/RebuildIndex` | Admin | Start a background build. Single-flight. |
+| `POST /AiSearch/RebuildIndex` | Admin | Start a background build. Only one build runs at a time. |
 | `GET /AiSearch/ClientScript` | none | The injected UI script. Contains no secrets. |
 
 `Recommend` accepts `mode` (`normal` or `surprise`), `scope` (`movies` or `tv`), `locale`,
@@ -270,8 +271,8 @@ Three endpoints, each a full URL, each authenticated with a bearer key.
 }
 ```
 
-Only `itemId` is required. The plugin intersects the returned ids with the caller's own item list,
-so a remote service cannot widen what a user sees.
+Only `itemId` is required. The plugin checks the returned ids against the user's own library,
+so a remote service cannot grant access to other content.
 
 **Chat** (required). `POST {ChatEndpointUrl}`, a standard chat completion. Any
 `/v1/chat/completions` fits.
@@ -283,10 +284,12 @@ embedding dropdown may add `?capability=embedding` when the service supports it.
 
 - Endpoint URLs and API keys stay in the server-side plugin configuration. The web client never
   sees them.
-- Per search the backend receives: your prompt, and the title, year, genres, cast and a short
-  synopsis for about 40 candidates. Favorites and watch history are sent as title lists.
-- During an index build the backend receives one metadata document per title.
-- With a local Ollama, "the backend receives" means the data stays on your LAN.
+- For each search, the chat service receives your prompt and the title, year, genres, cast and a
+  short synopsis for about 40 candidates. With personalization enabled, it also receives favorites
+  and watch history as title lists, along with your taste profile.
+- During an index build, the embedding service receives the metadata for each title that needs
+  a new embedding.
+- If both services use local Ollama, this data stays on your network.
 - History and taste profiles are JSON files under Jellyfin's data folder, one per user.
 
 ## Troubleshooting
@@ -295,15 +298,15 @@ embedding dropdown may add `?capability=embedding` when the service supports it.
 |---|---|
 | "No models returned" | Save the URL and key first, then reload the dropdown. |
 | Index stays at 0 | Read the status line under "Build index now". It shows the last error verbatim. The scheduled task log holds the same information. |
-| Results feel random | The search is on the fallback path. Build the index. With nomic, set the prefixes. |
+| Results feel random | The plugin may be searching without an index. Build the index and check for errors. With nomic, also check the prefixes. |
 | Ollama returns 500 on embeddings, but short strings work | Seen on a GTX 1660 SUPER: bge-m3 returned NaN vectors on the GPU. Run the embedding model on CPU: `printf 'FROM bge-m3\nPARAMETER num_gpu 0\n' \| ollama create bge-m3-cpu -f -` |
 | Search bar missing | The plugin injects one script tag into the web client `index.html` at startup. Check the log for `AiSearch:` lines. A custom web build may need the tag by hand: `<script src="/AiSearch/ClientScript" defer></script>` |
 
 ## Limits
 
-- The index holds one vector per title. Long synopses are compressed into a single vector, so very
-  specific plot questions can miss.
-- Episode search needs the TV index. Until it is built, TV search runs on the fallback path.
+- The index holds one vector per title. Each synopsis is represented by one set of numbers, so very
+  specific plot details can be missed.
+- Episode search needs the TV index. Until it is built, TV search uses a smaller selection from the library.
 - History keeps 12 entries per user.
 - The client script is injected into the shipped web client. A custom or externally hosted web
   client needs the script tag added by hand.
