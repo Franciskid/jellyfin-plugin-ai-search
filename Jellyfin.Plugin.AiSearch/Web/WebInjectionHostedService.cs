@@ -10,8 +10,8 @@ namespace Jellyfin.Plugin.AiSearch.Web;
 
 /// <summary>
 /// Injects (and removes) a single script tag into the web client's index.html so
-/// the AI search UI loads. The original file is backed up and the change is
-/// idempotent and reversible.
+/// the AI search UI loads. The original file is backed up when the web folder
+/// allows it, and the change is idempotent and reversible.
 /// </summary>
 public class WebInjectionHostedService : IHostedService
 {
@@ -77,11 +77,7 @@ public class WebInjectionHostedService : IHostedService
             return;
         }
 
-        var backup = path + ".aisearch.bak";
-        if (!File.Exists(backup))
-        {
-            File.Copy(path, backup);
-        }
+        TryBackup(path, path + ".aisearch.bak");
 
         var snippet = "\n" + Begin + "\n<script src=\"/AiSearch/ClientScript\" defer></script>\n" + End + "\n";
         var idx = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
@@ -89,6 +85,24 @@ public class WebInjectionHostedService : IHostedService
 
         File.WriteAllText(path, html);
         _logger.LogInformation("AiSearch: injected client script into {Path}.", path);
+    }
+
+    private void TryBackup(string path, string backup)
+    {
+        // The backup is only a convenience. Some images (linuxserver) make the
+        // web folder root-owned while index.html itself is writable, so a
+        // failed copy must not stop the injection.
+        try
+        {
+            if (!File.Exists(backup))
+            {
+                File.Copy(path, backup);
+            }
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            _logger.LogDebug(ex, "AiSearch: could not back up {Path}, injecting without a backup.", path);
+        }
     }
 
     private void Remove()
