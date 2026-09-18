@@ -4,6 +4,7 @@ using Jellyfin.Plugin.AiSearch.Search;
 using Jellyfin.Plugin.AiSearch.Web;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.AiSearch;
@@ -19,6 +20,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
         serviceCollection.AddHostedService<WebInjectionHostedService>();
+        serviceCollection.AddTransient<IStartupFilter, IndexHtmlScriptStartupFilter>();
 
         // Semantic index: one shared in-memory index, persisted to disk, built
         // by the scheduled task / config-page button, loaded back at startup.

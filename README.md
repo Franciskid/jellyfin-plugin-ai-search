@@ -300,7 +300,7 @@ embedding dropdown may add `?capability=embedding` when the service supports it.
 | Index stays at 0 | Read the status line under "Build index now". It shows the last error verbatim. The scheduled task log holds the same information. |
 | Results feel random | The plugin may be searching without an index. Build the index and check for errors. With nomic, also check the prefixes. |
 | Ollama returns 500 on embeddings, but short strings work | Seen on a GTX 1660 SUPER: bge-m3 returned NaN vectors on the GPU. Run the embedding model on CPU: `printf 'FROM bge-m3\nPARAMETER num_gpu 0\n' \| ollama create bge-m3-cpu -f -` |
-| Search bar missing | The plugin injects one script tag into the web client `index.html` at startup. Check the log for `AiSearch:` lines. A custom web build may need the tag by hand: `<script src="/AiSearch/ClientScript" defer></script>` |
+| Search bar missing | The plugin adds one script tag to the web client's `index.html` as Jellyfin serves it, so nothing on disk has to be writable. Check the log for `AiSearch:` lines and hard-refresh the browser. A web client served by something other than Jellyfin needs the tag by hand: `<script src="/AiSearch/ClientScript" defer></script>` |
 
 ## Limits
 

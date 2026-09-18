@@ -9,9 +9,11 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.AiSearch.Web;
 
 /// <summary>
-/// Injects (and removes) a single script tag into the web client's index.html so
-/// the AI search UI loads. The original file is backed up when the web folder
-/// allows it, and the change is idempotent and reversible.
+/// Best-effort extra: injects (and removes) a single script tag into the web
+/// client's index.html on disk at startup, backing up the original file when
+/// the web folder allows it. <see cref="IndexHtmlScriptMiddleware"/> adds the
+/// same tag while Jellyfin serves the page, which is what makes the search UI
+/// load even when this cannot write to disk.
 /// </summary>
 public class WebInjectionHostedService : IHostedService
 {
@@ -41,7 +43,7 @@ public class WebInjectionHostedService : IHostedService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "AiSearch: could not inject client script into web index.html. The API still works; add <script src=\"/AiSearch/ClientScript\"> manually if needed.");
+            _logger.LogDebug(ex, "AiSearch: could not write the script tag into index.html, it is added when the page is served instead.");
         }
 
         return Task.CompletedTask;
@@ -79,7 +81,7 @@ public class WebInjectionHostedService : IHostedService
 
         TryBackup(path, path + ".aisearch.bak");
 
-        var snippet = "\n" + Begin + "\n<script src=\"/AiSearch/ClientScript\" defer></script>\n" + End + "\n";
+        var snippet = "\n" + Begin + "\n<script src=\"../AiSearch/ClientScript\" defer></script>\n" + End + "\n";
         var idx = html.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
         html = idx >= 0 ? html.Insert(idx, snippet) : html + snippet;
 
