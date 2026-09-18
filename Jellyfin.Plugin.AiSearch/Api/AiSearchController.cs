@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
@@ -14,12 +14,14 @@ using Jellyfin.Plugin.AiSearch.Configuration;
 using Jellyfin.Plugin.AiSearch.History;
 using Jellyfin.Plugin.AiSearch.Recommend;
 using Jellyfin.Plugin.AiSearch.Search;
+using Jellyfin.Plugin.AiSearch.SearchLog;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Playlists;
 using MediaBrowser.Model.Playlists;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
@@ -92,10 +94,12 @@ public class AiSearchController : ControllerBase
     private readonly IUserDataManager _userDataManager;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly SemanticRetriever _semanticRetriever;
+    private readonly RemoteSearchClient _remoteSearchClient;
     private readonly DirectChatClient _directChat;
     private readonly IPlaylistManager _playlistManager;
     private readonly HistoryStore _history;
     private readonly TasteProfileStore _taste;
+    private readonly SearchLogStore _searchLog;
     private readonly ILogger<AiSearchController> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="AiSearchController"/> class.</summary>
@@ -105,10 +109,12 @@ public class AiSearchController : ControllerBase
         IUserDataManager userDataManager,
         IHttpClientFactory httpClientFactory,
         SemanticRetriever semanticRetriever,
+        RemoteSearchClient remoteSearchClient,
         DirectChatClient directChat,
         IPlaylistManager playlistManager,
         HistoryStore history,
         TasteProfileStore taste,
+        SearchLogStore searchLog,
         ILogger<AiSearchController> logger)
     {
         _userManager = userManager;
@@ -116,10 +122,12 @@ public class AiSearchController : ControllerBase
         _userDataManager = userDataManager;
         _httpClientFactory = httpClientFactory;
         _semanticRetriever = semanticRetriever;
+        _remoteSearchClient = remoteSearchClient;
         _directChat = directChat;
         _playlistManager = playlistManager;
         _history = history;
         _taste = taste;
+        _searchLog = searchLog;
         _logger = logger;
     }
 
@@ -148,6 +156,7 @@ public class AiSearchController : ControllerBase
     /// <summary>Serves the injected web-client script (no auth; contains no secrets).</summary>
     [HttpGet("ClientScript")]
     [AllowAnonymous]
+    [AiPopupEndpoint]
     public ActionResult ClientScript()
     {
         // The injected <script> tag is unversioned, so tell browsers to revalidate;
@@ -161,6 +170,7 @@ public class AiSearchController : ControllerBase
     /// <summary>Lightweight status endpoint so the client knows whether AI search is usable.</summary>
     [HttpGet("Health")]
     [Authorize(AuthenticationSchemes = "CustomAuthentication")]
+    [AiPopupEndpoint]
     public ActionResult Health()
     {
         var c = Config;
@@ -174,21 +184,32 @@ public class AiSearchController : ControllerBase
         });
     }
 
-    /// <summary>Proxies the model-alias list for the admin config dropdown.</summary>
+    /// <summary>Proxies the model-alias list for the admin config dropdown (admin only; only the config page calls this).</summary>
     [HttpGet("Models")]
     [Authorize(AuthenticationSchemes = "CustomAuthentication")]
+    [AiPopupEndpoint]
     public async Task<ActionResult> Models(CancellationToken cancellationToken)
     {
+        if (!User.IsInRole("Administrator"))
+        {
+            return Forbid();
+        }
+
         var c = Config;
         Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
         return await ListModelsAsync(c.ModelsEndpointUrl, c.ChatApiKey, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Proxies the embedding-model list for the local-index dropdown.</summary>
+    /// <summary>Proxies the embedding-model list for the local-index dropdown (admin only; only the config page calls this).</summary>
     [HttpGet("EmbeddingModels")]
     [Authorize(AuthenticationSchemes = "CustomAuthentication")]
     public async Task<ActionResult> EmbeddingModels(CancellationToken cancellationToken)
     {
+        if (!User.IsInRole("Administrator"))
+        {
+            return Forbid();
+        }
+
         var c = Config;
         Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
         // A dedicated embedding-models URL when set, otherwise the main models
@@ -280,8 +301,11 @@ public class AiSearchController : ControllerBase
     /// <summary>Returns AI-chosen library recommendations for the authenticated user's prompt.</summary>
     [HttpPost("Recommend")]
     [Authorize(AuthenticationSchemes = "CustomAuthentication")]
+    [AiPopupEndpoint]
     public async Task<ActionResult> Recommend([FromBody] RecommendRequest request, CancellationToken cancellationToken)
     {
+        var requestStartedAt = DateTime.UtcNow;
+        var requestStopwatch = Stopwatch.StartNew();
         var c = Config;
         if (!c.Enabled)
         {
@@ -423,7 +447,7 @@ public class AiSearchController : ControllerBase
         // retrieved, with no model call and no per-result reason.
         if (!c.UseModel)
         {
-            return RetrievalOnly(candidates, maxResults, userId, historyPrompt, mode, record, conversationId);
+            return RetrievalOnly(candidates, maxResults, userId, historyPrompt, mode, record, conversationId, requestStartedAt, requestStopwatch);
         }
 
         // Resolve cast from live metadata only on the semantic path (≤ ~40
@@ -442,7 +466,7 @@ public class AiSearchController : ControllerBase
             MaybeRefreshProfile(c, userId, favorites, watched, locale);
         }
 
-        return await RunRecommendation(c, modelPrompt, locale, maxResults, enriched, favorites, watched, usedSemantic, userId, historyPrompt, mode, record, conversationId, profileText, cancellationToken).ConfigureAwait(false);
+        return await RunRecommendation(c, modelPrompt, locale, maxResults, enriched, favorites, watched, usedSemantic, userId, historyPrompt, mode, record, conversationId, profileText, requestStartedAt, requestStopwatch, cancellationToken).ConfigureAwait(false);
     }
 
     // Regenerates the taste profile in the background when it is missing, older
@@ -632,47 +656,17 @@ public class AiSearchController : ControllerBase
             client = new { name = "jellyfin-ai-search", version = ClientVersion }
         };
 
-        string raw;
-        try
+        var response = await _remoteSearchClient
+            .SearchAsync(c.SearchEndpointUrl, c.SearchApiKey, c.TimeoutSeconds, payload, cancellationToken)
+            .ConfigureAwait(false);
+        if (response.Error is not null)
         {
-            using var client = CreateClient(c, c.SearchApiKey);
-            using var resp = await client
-                .PostAsJsonAsync(c.SearchEndpointUrl.Trim(), payload, cancellationToken)
-                .ConfigureAwait(false);
-            raw = await resp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            if (!resp.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("AiSearch: search endpoint returned {Status}: {Body}", (int)resp.StatusCode, Trunc(raw, 300));
-                return null;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "AiSearch: search endpoint call failed.");
-            return null;
+            _logger.LogWarning("AiSearch: search endpoint call failed: {Error}", response.Error);
         }
 
-        List<Guid> ids;
-        try
+        var ranked = response.Results;
+        if (ranked is null)
         {
-            using var doc = JsonDocument.Parse(raw);
-            if (!doc.RootElement.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
-            {
-                return null;
-            }
-
-            ids = new List<Guid>(results.GetArrayLength());
-            foreach (var r in results.EnumerateArray())
-            {
-                if (Guid.TryParse(GetString(r, "itemId"), out var g))
-                {
-                    ids.Add(g);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "AiSearch: unexpected search response: {Body}", Trunc(raw, 300));
             return null;
         }
 
@@ -685,7 +679,7 @@ public class AiSearchController : ControllerBase
         }
 
         var picked = new List<BaseItem>(maxRetrieve);
-        foreach (var id in ids)
+        foreach (var (id, _) in ranked)
         {
             if (!byId.TryGetValue(id, out var item) || exclude.Contains(id))
             {
@@ -709,7 +703,7 @@ public class AiSearchController : ControllerBase
 
     // Model disabled: the retrieved candidates, already ranked by relevance, are
     // the results. No model call, no per-result reason, no answer summary.
-    private ActionResult RetrievalOnly(List<BaseItem> candidates, int maxResults, Guid userId, string historyPrompt, string mode, bool record, string conversationId)
+    private ActionResult RetrievalOnly(List<BaseItem> candidates, int maxResults, Guid userId, string historyPrompt, string mode, bool record, string conversationId, DateTime requestStartedAt, Stopwatch requestStopwatch)
     {
         var items = new List<HistoryItem>();
         foreach (var item in candidates)
@@ -736,12 +730,13 @@ public class AiSearchController : ControllerBase
             AppendHistory(userId, historyPrompt, mode, items);
         }
 
+        EnqueueAiSearchLog(requestStartedAt, requestStopwatch.ElapsedMilliseconds, historyPrompt, mode, null, items);
         return Ok(new { answer = (string?)null, model = (string?)null, usedProfile = false, results = ToResults(items) });
     }
 
     // --- The model call: candidate list in, chosen recommendations out. ---
     private async Task<ActionResult> RunRecommendation(
-        PluginConfiguration c, string prompt, string locale, int maxResults, List<CandidateMovie> candidates, List<string> favorites, List<string> watched, bool usedSemantic, Guid userId, string historyPrompt, string mode, bool record, string conversationId, string? tasteProfile, CancellationToken cancellationToken)
+        PluginConfiguration c, string prompt, string locale, int maxResults, List<CandidateMovie> candidates, List<string> favorites, List<string> watched, bool usedSemantic, Guid userId, string historyPrompt, string mode, bool record, string conversationId, string? tasteProfile, DateTime requestStartedAt, Stopwatch requestStopwatch, CancellationToken cancellationToken)
     {
         if (candidates.Count == 0)
         {
@@ -809,6 +804,8 @@ public class AiSearchController : ControllerBase
             AppendHistory(userId, historyPrompt, mode, items);
         }
 
+        EnqueueAiSearchLog(requestStartedAt, requestStopwatch.ElapsedMilliseconds, historyPrompt, mode, parsed.Answer, items);
+
         var usedProfile = favorites.Count > 0 || watched.Count > 0 || !string.IsNullOrWhiteSpace(tasteProfile);
         return Ok(new { answer = parsed.Answer, model = c.Model, usedProfile, results = ToResults(items) });
     }
@@ -821,6 +818,7 @@ public class AiSearchController : ControllerBase
     /// </summary>
     [HttpPost("Interview")]
     [Authorize(AuthenticationSchemes = "CustomAuthentication")]
+    [AiPopupEndpoint]
     public async Task<ActionResult> Interview([FromBody] InterviewRequest request, CancellationToken cancellationToken)
     {
         var c = Config;
@@ -860,6 +858,7 @@ public class AiSearchController : ControllerBase
     /// <summary>Returns the authenticated user's recent searches, newest first.</summary>
     [HttpGet("History")]
     [Authorize(AuthenticationSchemes = "CustomAuthentication")]
+    [AiPopupEndpoint]
     public ActionResult History()
     {
         var userId = GetUserId();
@@ -888,6 +887,7 @@ public class AiSearchController : ControllerBase
     [HttpDelete("History")]
     [HttpDelete("History/{id}")]
     [Authorize(AuthenticationSchemes = "CustomAuthentication")]
+    [AiPopupEndpoint]
     public ActionResult DeleteHistory(string? id = null)
     {
         var userId = GetUserId();
@@ -903,6 +903,7 @@ public class AiSearchController : ControllerBase
     /// <summary>Saves a set of movies as a private playlist for the authenticated user.</summary>
     [HttpPost("Playlist")]
     [Authorize(AuthenticationSchemes = "CustomAuthentication")]
+    [AiPopupEndpoint]
     public async Task<ActionResult> Playlist([FromBody] PlaylistRequest request)
     {
         var userId = GetUserId();
@@ -983,6 +984,44 @@ public class AiSearchController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "AiSearch: could not append to history.");
+        }
+    }
+
+    // Cheap early-out when logging is off, then never let a logging failure
+    // break the response that already succeeded.
+    private void EnqueueAiSearchLog(DateTime requestStartedAt, long durationMs, string prompt, string mode, string? answer, List<HistoryItem> items)
+    {
+        if (!Config.LogSearches)
+        {
+            return;
+        }
+
+        try
+        {
+            var entry = new SearchLogEntry
+            {
+                Timestamp = requestStartedAt.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture),
+                Kind = "ai",
+                Endpoint = HttpContext.Request.Path.Value ?? string.Empty,
+                Method = HttpContext.Request.Method,
+                StatusCode = StatusCodes.Status200OK,
+                DurationMs = durationMs,
+                SearchTerm = prompt,
+                Mode = mode,
+                Answer = answer,
+                ResultCount = items.Count,
+                TotalRecordCount = null
+            };
+
+            SearchLogEntryBuilder.ApplyRequest(entry, HttpContext, _userManager, _libraryManager);
+            entry.Results = SearchLogEntryBuilder.FromHistoryItems(items, _libraryManager);
+            entry.ResultsLogged = entry.Results.Count;
+
+            _searchLog.Enqueue(entry);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AiSearch: could not build a search log entry.");
         }
     }
 
@@ -1159,6 +1198,4 @@ public class AiSearchController : ControllerBase
     // Episodes read better as "Series, S02E05, Title" than a bare episode name.
     private static string? DisplayTitle(BaseItem item) =>
         item is Episode episode ? DocumentBuilder.EpisodeLabel(episode) : item.Name;
-
-    private static string Trunc(string s, int n) => s.Length <= n ? s : s.Substring(0, n);
 }

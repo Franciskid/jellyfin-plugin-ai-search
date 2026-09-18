@@ -5,17 +5,20 @@ namespace Jellyfin.Plugin.AiSearch.Configuration;
 /// <summary>
 /// Plugin configuration, editable from the Jellyfin dashboard.
 ///
-/// <para>The plugin always runs the same flow: it narrows your library to a
-/// shortlist of candidate titles ("retrieval"), then asks a language model to
-/// pick and explain the best matches. Only two things must be configured:</para>
+/// <para>The plugin offers two independent features, and neither one needs
+/// everything below configured:</para>
 ///
 /// <list type="number">
-///   <item><description><b>A language model (chat) endpoint</b>, any
-///   OpenAI-compatible <c>/v1/chat/completions</c> endpoint, or a platform's
-///   <c>/api/media/chat</c>. Always required.</description></item>
-///   <item><description><b>A retrieval source</b>, either <b>Local</b> (the
-///   plugin builds and queries its own embedding index on this server) or
-///   <b>Remote</b> (a service returns candidates for a query).</description></item>
+///   <item><description>The <b>AI search popup</b>: narrows your library to a
+///   shortlist of candidate titles ("retrieval"), then, unless <see
+///   cref="UseModel"/> is off, asks a language model to pick and explain the
+///   best matches. A retrieval source (<b>Local</b>, the plugin's own
+///   embedding index, or <b>Remote</b>, a service that returns candidates) is
+///   needed either way; a language model is needed only when
+///   <see cref="UseModel"/> is on.</description></item>
+///   <item><description><b>Semantic matches inside Jellyfin's own search</b>
+///   (<see cref="SemanticSearchEnabled"/>): needs only a retrieval source, no
+///   language model, and works independently of the popup.</description></item>
 /// </list>
 /// </summary>
 public class PluginConfiguration : BasePluginConfiguration
@@ -162,4 +165,49 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Gets or sets the request timeout, in seconds.</summary>
     public int TimeoutSeconds { get; set; } = 45;
+
+    // 4. Semantic matches inside Jellyfin's own native search
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the plugin contributes semantic
+    /// (meaning-based) matches to Jellyfin's own search (<c>/Items</c> and
+    /// <c>/Search/Hints</c>), alongside the built-in title search. Uses the same
+    /// retrieval source as the popup; needs no language model.
+    /// </summary>
+    public bool SemanticSearchEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether native-search semantic matching
+    /// only runs for queries that look like a sentence rather than a short
+    /// title/keyword search, to avoid noisy matches on very short terms.
+    /// </summary>
+    public bool SemanticSearchSentencesOnly { get; set; }
+
+    /// <summary>
+    /// Gets or sets the minimum word count a search term must have for semantic
+    /// matching to run, when <see cref="SemanticSearchSentencesOnly"/> is on.
+    /// </summary>
+    public int SemanticSearchMinWords { get; set; } = 3;
+
+    /// <summary>Gets or sets the maximum number of semantic matches added to a native search.</summary>
+    public int SemanticSearchMaxResults { get; set; } = 20;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the AI search popup (and its
+    /// endpoints) is hidden, leaving only Jellyfin's own search enhanced with
+    /// semantic matches.
+    /// </summary>
+    public bool NativeSearchOnly { get; set; }
+
+    // 5. Search log
+
+    /// <summary>
+    /// Gets or sets a value indicating whether native Jellyfin searches and AI
+    /// popup searches are recorded to a local, line-delimited JSON log for an
+    /// external collector to read via <c>GET /AiSearch/SearchLog</c>.
+    /// </summary>
+    public bool LogSearches { get; set; }
+
+    /// <summary>Gets or sets how many days of search log files are kept (clamped to 1-365 at write/prune time).</summary>
+    public int SearchLogRetentionDays { get; set; } = 7;
 }

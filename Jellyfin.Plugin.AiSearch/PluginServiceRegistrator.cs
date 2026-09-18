@@ -1,10 +1,12 @@
 using Jellyfin.Plugin.AiSearch.History;
 using Jellyfin.Plugin.AiSearch.Recommend;
 using Jellyfin.Plugin.AiSearch.Search;
+using Jellyfin.Plugin.AiSearch.SearchLog;
 using Jellyfin.Plugin.AiSearch.Web;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.AiSearch;
@@ -32,11 +34,23 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<SemanticRetriever>();
         serviceCollection.AddHostedService<IndexStartupService>();
 
+        // Shared remote search endpoint caller: the AI popup controller and the
+        // native-search provider (SemanticSearchProvider) both use it.
+        serviceCollection.AddSingleton<RemoteSearchClient>();
+
         // Direct-mode chat caller.
         serviceCollection.AddSingleton<DirectChatClient>();
 
         // Per-user search history + taste profile (JSON files under the data folder).
         serviceCollection.AddSingleton<HistoryStore>();
         serviceCollection.AddSingleton<TasteProfileStore>();
+
+        // Search log: a global MVC filter captures every native Jellyfin search
+        // (not just this plugin's own controllers), a queue decouples that from
+        // request latency, and a background writer does the file I/O.
+        serviceCollection.AddSingleton<SearchLogStore>();
+        serviceCollection.AddSingleton<SearchLogFilter>();
+        serviceCollection.Configure<MvcOptions>(o => o.Filters.AddService<SearchLogFilter>());
+        serviceCollection.AddHostedService<SearchLogWriter>();
     }
 }

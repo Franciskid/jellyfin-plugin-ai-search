@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
@@ -11,12 +12,24 @@ namespace Jellyfin.Plugin.AiSearch.Web;
 
 /// <summary>
 /// Adds the plugin's client script tag to the web client's index.html while
-/// Jellyfin serves it, so nothing on disk has to be writable.
+/// Jellyfin serves it, so nothing on disk has to be writable. When
+/// <see cref="Configuration.PluginConfiguration.NativeSearchOnly"/> is on, does
+/// the opposite: strips any AiSearch script tag from the served page instead,
+/// whatever left it there (this middleware, the on-disk injector, or by hand).
 /// </summary>
 public sealed class IndexHtmlScriptMiddleware
 {
     private const string ScriptMarker = "AiSearch/ClientScript";
     private const string Snippet = "\n<!-- AiSearch:begin -->\n<script src=\"../AiSearch/ClientScript\" defer></script>\n<!-- AiSearch:end -->\n";
+    private const string BeginMarker = "<!-- AiSearch:begin -->";
+    private const string EndMarker = "<!-- AiSearch:end -->";
+
+    // Matches a bare <script ...AiSearch/ClientScript...></script> tag that was
+    // not wrapped in the begin/end markers above (hand-added, or an older
+    // version's format), so it can be stripped too under NativeSearchOnly.
+    private static readonly Regex BareScriptTag = new(
+        "<script\\b[^>]*\\bsrc\\s*=\\s*[\"'][^\"']*AiSearch/ClientScript[^\"']*[\"'][^>]*>\\s*</script>",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private readonly RequestDelegate _next;
     private readonly ILogger<IndexHtmlScriptMiddleware> _logger;
@@ -66,7 +79,11 @@ public sealed class IndexHtmlScriptMiddleware
             && context.Response.ContentType is not null
             && context.Response.ContentType.StartsWith("text/html", StringComparison.OrdinalIgnoreCase))
         {
-            bytes = AddScriptTag(context, bytes);
+            // Read live: the option can be flipped without a restart, so every
+            // request re-checks it rather than trusting a cached decision.
+            bytes = Plugin.Instance!.Configuration.NativeSearchOnly
+                ? StripScriptTag(context, bytes)
+                : AddScriptTag(context, bytes);
         }
 
         if (bytes.Length == 0)
@@ -114,6 +131,56 @@ public sealed class IndexHtmlScriptMiddleware
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "AiSearch: could not add the client script to index.html.");
+            return original;
+        }
+    }
+
+    private byte[] StripScriptTag(HttpContext context, byte[] original)
+    {
+        try
+        {
+            var html = Encoding.UTF8.GetString(original);
+            if (!html.Contains(ScriptMarker, StringComparison.OrdinalIgnoreCase))
+            {
+                return original;
+            }
+
+            var updatedHtml = html;
+            int start;
+            while ((start = updatedHtml.IndexOf(BeginMarker, StringComparison.Ordinal)) >= 0)
+            {
+                var end = updatedHtml.IndexOf(EndMarker, start, StringComparison.Ordinal);
+                if (end < 0)
+                {
+                    break;
+                }
+
+                updatedHtml = updatedHtml.Remove(start, (end - start) + EndMarker.Length);
+            }
+
+            updatedHtml = BareScriptTag.Replace(updatedHtml, string.Empty);
+
+            if (string.Equals(updatedHtml, html, StringComparison.Ordinal))
+            {
+                return original;
+            }
+
+            var updated = Encoding.UTF8.GetBytes(updatedHtml);
+
+            context.Response.Headers.Remove(HeaderNames.ETag);
+            context.Response.Headers.Remove(HeaderNames.LastModified);
+            context.Response.ContentLength = updated.Length;
+
+            if (Interlocked.Exchange(ref _logged, 1) == 0)
+            {
+                _logger.LogInformation("AiSearch: native search only is on; removing the client script from index.html as it is served.");
+            }
+
+            return updated;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AiSearch: could not remove the client script from index.html.");
             return original;
         }
     }

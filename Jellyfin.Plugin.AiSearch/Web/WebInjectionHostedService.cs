@@ -39,7 +39,16 @@ public class WebInjectionHostedService : IHostedService
     {
         try
         {
-            Inject();
+            // Native search only: keep the on-disk copy clean too, so it does not
+            // carry a dead tag left over from before the option was turned on.
+            if (Plugin.Instance!.Configuration.NativeSearchOnly)
+            {
+                Remove();
+            }
+            else
+            {
+                Inject();
+            }
         }
         catch (Exception ex)
         {

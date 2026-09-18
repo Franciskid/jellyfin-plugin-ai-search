@@ -14,8 +14,10 @@
                         <h2 class="sectionTitle">AI Search &amp; Recommendation</h2>
                     </div>
                     <p class="fieldDescription">
-                        Adds an AI search bar to the web client that recommends titles from your own library.
-                        Set a language model and a retrieval source below.
+                        Adds an AI search bar to the web client that recommends titles from your own library, and
+                        can add meaning-based matches to Jellyfin's own search. Set a language model and a
+                        retrieval source below for the search bar; the "Jellyfin search" section below only needs
+                        a retrieval source.
                     </p>
                 </div>
 
@@ -27,6 +29,7 @@
                 </div>
 
                 <!-- 1. Language model -->
+                <div id="languageModelSection">
                 <div class="verticalSection">
                     <h3 class="sectionTitle">1. Language model</h3>
                     <p class="fieldDescription">
@@ -73,6 +76,8 @@
                     <input is="emby-input" type="text" id="InterviewModel" label="&quot;Help me choose&quot; model (optional)" />
                     <div class="fieldDescription">A cheaper model for the short "Help me choose" questions. Blank reuses the model above.</div>
                 </div>
+                </div>
+                <!-- /languageModelSection -->
 
                 <!-- 2. Retrieval -->
                 <div class="verticalSection">
@@ -170,18 +175,18 @@
                 <div class="verticalSection">
                     <h3 class="sectionTitle">3. Options</h3>
                 </div>
-                <div class="inputContainer">
+                <div class="inputContainer" id="MaxRetrieveField">
                     <input is="emby-input" type="number" id="MaxRetrieve" label="Candidates retrieved per query" min="1" max="200" />
                     <div class="fieldDescription">How many shortlisted titles the model chooses from (local index and remote search).</div>
                 </div>
-                <div class="inputContainer">
+                <div class="inputContainer" id="MaxResultsField">
                     <input is="emby-input" type="number" id="MaxResults" label="Max results" min="1" max="24" />
                 </div>
-                <div class="inputContainer">
+                <div class="inputContainer" id="SynopsisMaxLengthField">
                     <input is="emby-input" type="number" id="SynopsisMaxLength" label="Synopsis characters per candidate (0 = no limit)" min="0" max="5000" />
                     <div class="fieldDescription">Caps how much of each candidate's synopsis is sent to the model. 0 sends the full synopsis.</div>
                 </div>
-                <div class="checkboxContainer checkboxContainer-withDescription">
+                <div class="checkboxContainer checkboxContainer-withDescription" id="IncludeWatchedField">
                     <label>
                         <input is="emby-checkbox" type="checkbox" id="IncludeWatched" />
                         <span>Include titles you've already watched</span>
@@ -190,6 +195,60 @@
                 <div class="inputContainer">
                     <input is="emby-input" type="number" id="TimeoutSeconds" label="Request timeout (seconds)" min="5" max="120" />
                 </div>
+
+                <!-- 4. Jellyfin search -->
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">4. Jellyfin search</h3>
+                    <p class="fieldDescription">
+                        Adds meaning-based matches to Jellyfin's own search, alongside its normal title matches.
+                        Uses the retrieval source above; no language model is needed for this.
+                    </p>
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="SemanticSearchEnabled" />
+                        <span>Add meaning-based matches to Jellyfin's search</span>
+                    </label>
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="SemanticSearchSentencesOnly" />
+                        <span>Only for searches that look like a sentence</span>
+                    </label>
+                    <div class="fieldDescription">Skips short keyword-style searches, where meaning-based matches tend to be noisy.</div>
+                </div>
+                <div class="inputContainer" id="SemanticSearchMinWordsField">
+                    <input is="emby-input" type="number" id="SemanticSearchMinWords" label="Minimum words to run" min="1" max="20" />
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="number" id="SemanticSearchMaxResults" label="Max meaning-based matches per search" min="1" max="100" />
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="NativeSearchOnly" />
+                        <span>Native search only</span>
+                    </label>
+                    <div class="fieldDescription">
+                        Hides the AI search bar and its popup entirely, and turns off its endpoints. Jellyfin's own
+                        search still gets meaning-based matches from the option above.
+                    </div>
+                </div>
+
+                <!-- 5. Search log -->
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">5. Search log</h3>
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="LogSearches" />
+                        <span>Log searches</span>
+                    </label>
+                    <div class="fieldDescription">Records Jellyfin searches and AI popup searches to a local file, for an admin or API key to read.</div>
+                </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="number" id="SearchLogRetentionDays" label="Keep logs for (days)" min="1" max="365" />
+                </div>
+                <p class="fieldDescription">The log is read by an admin or API key at <code>GET /AiSearch/SearchLog</code>.</p>
 
                 <div>
                     <button is="emby-button" type="submit" class="raised button-submit block">
@@ -212,6 +271,24 @@
                 var mode = page.querySelector('#RetrievalMode').value;
                 page.querySelector('#remoteFields').style.display = mode === 'remote' ? '' : 'none';
                 page.querySelector('#localFields').style.display = mode === 'remote' ? 'none' : '';
+            }
+
+            function applySentencesOnly() {
+                var on = page.querySelector('#SemanticSearchSentencesOnly').checked;
+                page.querySelector('#SemanticSearchMinWordsField').style.display = on ? '' : 'none';
+            }
+
+            // Native search only hides the language model section and the options
+            // that only affect the popup, since the popup itself is hidden.
+            function applyNativeSearchOnly() {
+                var on = page.querySelector('#NativeSearchOnly').checked;
+                var display = on ? 'none' : '';
+                page.querySelector('#languageModelSection').style.display = display;
+                page.querySelector('#MaxResultsField').style.display = display;
+                page.querySelector('#SynopsisMaxLengthField').style.display = display;
+                page.querySelector('#IncludeWatchedField').style.display = display;
+                page.querySelector('#MaxRetrieveField').style.display = display;
+                page.querySelector('#ReloadModels').style.display = display;
             }
 
             function populateSelect(apiPath, selId, hintId, btnId, selected) {
@@ -278,7 +355,16 @@
                     page.querySelector('#SynopsisMaxLength').value = cfg.SynopsisMaxLength;
                     page.querySelector('#IncludeWatched').checked = cfg.IncludeWatched;
                     page.querySelector('#TimeoutSeconds').value = cfg.TimeoutSeconds;
+                    page.querySelector('#SemanticSearchEnabled').checked = cfg.SemanticSearchEnabled !== false;
+                    page.querySelector('#SemanticSearchSentencesOnly').checked = cfg.SemanticSearchSentencesOnly === true;
+                    page.querySelector('#SemanticSearchMinWords').value = cfg.SemanticSearchMinWords;
+                    page.querySelector('#SemanticSearchMaxResults').value = cfg.SemanticSearchMaxResults;
+                    page.querySelector('#NativeSearchOnly').checked = cfg.NativeSearchOnly === true;
+                    page.querySelector('#LogSearches').checked = cfg.LogSearches === true;
+                    page.querySelector('#SearchLogRetentionDays').value = cfg.SearchLogRetentionDays;
                     applyRetrievalMode();
+                    applySentencesOnly();
+                    applyNativeSearchOnly();
                     loadModels(cfg.Model);
                     loadEmbeddingModels(cfg.EmbeddingModel);
                     refreshIndexStatus();
@@ -344,6 +430,13 @@
                     cfg.SynopsisMaxLength = isNaN(syn) ? 0 : syn;
                     cfg.IncludeWatched = page.querySelector('#IncludeWatched').checked;
                     cfg.TimeoutSeconds = parseInt(page.querySelector('#TimeoutSeconds').value, 10) || 45;
+                    cfg.SemanticSearchEnabled = page.querySelector('#SemanticSearchEnabled').checked;
+                    cfg.SemanticSearchSentencesOnly = page.querySelector('#SemanticSearchSentencesOnly').checked;
+                    cfg.SemanticSearchMinWords = parseInt(page.querySelector('#SemanticSearchMinWords').value, 10) || 3;
+                    cfg.SemanticSearchMaxResults = parseInt(page.querySelector('#SemanticSearchMaxResults').value, 10) || 20;
+                    cfg.NativeSearchOnly = page.querySelector('#NativeSearchOnly').checked;
+                    cfg.LogSearches = page.querySelector('#LogSearches').checked;
+                    cfg.SearchLogRetentionDays = parseInt(page.querySelector('#SearchLogRetentionDays').value, 10) || 7;
                     ApiClient.updatePluginConfiguration(AiSearchPluginId, cfg).then(function (r) {
                         Dashboard.processPluginConfigurationUpdateResult(r);
                     });
@@ -357,6 +450,8 @@
             });
             document.querySelector('#AiSearchConfigForm').addEventListener('submit', save);
             document.querySelector('#RetrievalMode').addEventListener('change', applyRetrievalMode);
+            document.querySelector('#SemanticSearchSentencesOnly').addEventListener('change', applySentencesOnly);
+            document.querySelector('#NativeSearchOnly').addEventListener('change', applyNativeSearchOnly);
             document.querySelector('#ReloadModels').addEventListener('click', function () {
                 loadModels(page.querySelector('#Model').value);
             });

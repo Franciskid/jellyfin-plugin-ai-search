@@ -2,8 +2,14 @@
 
 Describe what you want to watch, and the plugin searches your Jellyfin library for a match.
 It finds relevant titles, then asks a language model to pick the best ones and explain each choice.
+The same retrieval also plugs into Jellyfin's own search, so meaning-based matches show up
+alongside ordinary title matches without opening the AI search bar at all.
 
-`Jellyfin 10.11` · `.NET 9` · `no database` · `any OpenAI-compatible endpoint` · `runs fully offline with Ollama`
+`Jellyfin 12.0+` · `.NET 10` · `no database` · `any OpenAI-compatible endpoint` · `runs fully offline with Ollama`
+
+Version 1.2.0.0 requires Jellyfin 12.0 or newer. Jellyfin 10.11 servers keep getting version
+1.1.1.0 from the plugin catalog automatically; the repository's manifest lists both versions and
+Jellyfin picks the one that matches the running server.
 
 ```
 "something tense and short for tonight, like Sicario"
@@ -109,6 +115,107 @@ current index.
 | **Retrieval only** | Turn the language model off. The plugin then returns the retrieval matches ranked by similarity, without explanations or a chat model call. Embedding costs still depend on your provider. |
 
 Answers follow the web client language. French and English are detected and passed to the model.
+
+## Jellyfin search integration
+
+Since 1.2.0.0, the plugin also registers itself as one of Jellyfin's own search providers
+(`ISearchProvider`, internal, priority 50). It runs alongside Jellyfin's built-in title search
+(`SqlSearchProvider`) whenever you search from the web client's search page, or call
+`GET /Items?searchTerm=` or `GET /Search/Hints` directly. No AI popup involved: this works even
+with **Native search only** (below) turned on, and needs no language model, only a retrieval
+source (local index or remote service).
+
+How it merges with title search:
+
+- The built-in provider scores an exact title match 100, a prefix match 80, a word-prefix match
+  75, and a "contains" match 50.
+- This plugin's matches always score below 50 (`1` to `49`, based on retrieval rank), so a
+  meaning-based match never outranks an actual title match. Jellyfin merges every provider's
+  results by the best score per item, then loads and sorts them, so your matches land after title
+  matches, in whichever Movies / Shows / Episodes section the web client groups them into.
+- Covers **Movie**, **Series** and **Episode** items, the same three types the popup and the local
+  index already handle. A search restricted to other types (music, books, people, ...) gets no
+  matches from this plugin.
+
+Scoping and access control:
+
+- Respects the search's own `includeItemTypes` / `excludeItemTypes` and `mediaTypes` filters, and
+  `parentId` (scopes to that whole subtree, e.g. one library).
+- Jellyfin trusts an internal search provider to filter by the calling user itself; this plugin
+  does that by loading each candidate through the user's own library view and checking Jellyfin's
+  standard visibility and parental-control rule (`BaseItem.IsVisibleStandalone`) before returning
+  it. An API-key call with no user context skips that per-user check, same as Jellyfin's own
+  providers do.
+- A 5-second internal timeout protects ordinary Jellyfin search from ever waiting on a slow
+  embeddings or search backend; on timeout or any other failure, this plugin simply contributes no
+  matches for that search (title search is unaffected).
+
+Options (**Dashboard → Plugins → AI Search**, "4. Jellyfin search"):
+
+| Option | Default | Effect |
+|---|---|---|
+| Add meaning-based matches to Jellyfin's search | On | Turns the feature on or off. |
+| Only for searches that look like a sentence | Off | Skips short keyword-style searches (see the minimum word count below), where meaning-based matches tend to be noisy. |
+| Minimum words to run | 3 | Used only when the option above is on. |
+| Max meaning-based matches per search | 20 | Upper bound on how many of this plugin's matches are added to one search. |
+| Native search only | Off | See below. |
+
+### Native search only
+
+Turning this on hides the AI search bar and popup entirely, leaving Jellyfin's own search (now
+with meaning-based matches, if enabled above) as the only search experience.
+
+- The web client's `index.html` is served without the popup's `<script>` tag; a copy already
+  present (from before the option was turned on, or added by hand) is stripped as the page is
+  served, and the on-disk injected copy is removed at startup too.
+- These endpoints, which only ever serve the popup, are refused with a bare 404: `ClientScript`,
+  `Health`, `Models`, `Recommend`, `Interview`, `History` (GET and DELETE), `Playlist`.
+- These stay reachable regardless of this option, since they serve the dashboard or native search:
+  `EmbeddingModels`, `IndexStatus`, `RebuildIndex`, `SearchLog`.
+
+## Search log
+
+Turned off by default. When **Log searches** is on, the plugin records every native Jellyfin
+search (from the filter above, whenever a request carries a non-empty `searchTerm`) and every AI
+popup search to a local, line-delimited JSON file, one compact JSON object per line, for an
+external collector or another admin tool to read.
+
+- Files live at `{Jellyfin data folder}/aisearch/searchlog/{yyyy-MM-dd}.jsonl` (UTC date), one
+  file per day.
+- **Keep logs for (days)** (default 7, 1-365) controls retention: files older than that are
+  deleted at startup and every hour after.
+- Recorded per entry: a strictly increasing id, the request timestamp/endpoint/method/status/
+  duration, the search term, the caller's user id/name, whether it was an API key, client name/
+  version/device, remote address and User-Agent, every other query parameter (with anything that
+  looks like a credential - API key, token, auth, password - left out), the `parentId` scope if
+  any, result counts, and up to 250 result rows (item id, name, type, year, series/season/episode,
+  whether it was a semantic match with its similarity and rank, and, for AI popup entries, the
+  model's one-line reason). AI popup entries also carry the mode (`normal`/`surprise`) and the
+  model's answer text.
+
+**`GET /AiSearch/SearchLog`** (admin only) reads it back:
+
+| Query parameter | Meaning |
+|---|---|
+| `from` | Inclusive lower timestamp bound (ISO 8601, UTC). Omit for unbounded. |
+| `to` | Exclusive upper timestamp bound (ISO 8601, UTC). Omit for unbounded. |
+| `afterId` | Only return entries with an id greater than this, for paging. |
+| `limit` | Max entries to return, 1-5000, default 1000. |
+
+```jsonc
+// response
+{
+  "entries": [ /* the stored JSON objects, unchanged */ ],
+  "hasMore": false,
+  "nextAfterId": 12345,        // id of the last entry returned, or null if entries is empty
+  "loggingEnabled": true,
+  "retentionDays": 7,
+  "oldestTimestamp": "2026-09-12T00:00:00.000Z"  // or null if no log files exist
+}
+```
+
+To page through everything: call once with no `afterId`, then repeat with `afterId` set to the
+previous response's `nextAfterId` until `hasMore` is `false`.
 
 ## Install
 
@@ -223,21 +330,39 @@ when you need to cap usage per user centrally. The contract is at the bottom of 
 | Include titles you already watched | Off by default. |
 | Request timeout | Seconds before the backend call is abandoned. Default 45. |
 
+**Jellyfin search** (see [Jellyfin search integration](#jellyfin-search-integration) above)
+
+| Option | Default | Effect |
+|---|---|---|
+| Add meaning-based matches to Jellyfin's search | On | Uses the retrieval source above; no language model needed. |
+| Only for searches that look like a sentence | Off | Skips short keyword-style searches. |
+| Minimum words to run | 3 | Only checked when the option above is on. |
+| Max meaning-based matches per search | 20 | Upper bound per search. |
+| Native search only | Off | Hides the AI search bar/popup and its endpoints. |
+
+**Search log** (see [Search log](#search-log) above)
+
+| Option | Default | Effect |
+|---|---|---|
+| Log searches | Off | Records native and AI popup searches to a local file. |
+| Keep logs for (days) | 7 | 1-365. Older files are deleted at startup and hourly. |
+
 ## HTTP API
 
-| Endpoint | Auth | Purpose |
-|---|---|---|
-| `POST /AiSearch/Recommend` | Session | Run a search for the calling user |
-| `POST /AiSearch/Interview` | Session | Model-written questions for "Help me choose" |
-| `GET /AiSearch/History` | Session | The caller's recent searches |
-| `DELETE /AiSearch/History[/{id}]` | Session | Delete one search, or clear all |
-| `POST /AiSearch/Playlist` | Session | Save a result set as a playlist |
-| `GET /AiSearch/Health` | Session | Enabled and configured state, for the client script |
-| `GET /AiSearch/Models` | Session | Chat models, proxied from the models endpoint |
-| `GET /AiSearch/EmbeddingModels` | Session | Embedding models, for the config dropdown |
-| `GET /AiSearch/IndexStatus` | Admin | Index size, model, last build, last error |
-| `POST /AiSearch/RebuildIndex` | Admin | Start a background build. Only one build runs at a time. |
-| `GET /AiSearch/ClientScript` | none | The injected UI script. Contains no secrets. |
+| Endpoint | Auth | Purpose | Native search only |
+|---|---|---|---|
+| `POST /AiSearch/Recommend` | Session | Run a search for the calling user | Refused (404) |
+| `POST /AiSearch/Interview` | Session | Model-written questions for "Help me choose" | Refused (404) |
+| `GET /AiSearch/History` | Session | The caller's recent searches | Refused (404) |
+| `DELETE /AiSearch/History[/{id}]` | Session | Delete one search, or clear all | Refused (404) |
+| `POST /AiSearch/Playlist` | Session | Save a result set as a playlist | Refused (404) |
+| `GET /AiSearch/Health` | Session | Enabled and configured state, for the client script | Refused (404) |
+| `GET /AiSearch/ClientScript` | none | The injected UI script. Contains no secrets. | Refused (404) |
+| `GET /AiSearch/Models` | Admin | Chat models, proxied from the models endpoint | Refused (404) |
+| `GET /AiSearch/EmbeddingModels` | Admin | Embedding models, for the config dropdown | Reachable |
+| `GET /AiSearch/IndexStatus` | Admin | Index size, model, last build, last error | Reachable |
+| `POST /AiSearch/RebuildIndex` | Admin | Start a background build. Only one build runs at a time. | Reachable |
+| `GET /AiSearch/SearchLog` | Admin | Page through the search log (see [Search log](#search-log)) | Reachable |
 
 `Recommend` accepts `mode` (`normal` or `surprise`), `scope` (`movies` or `tv`), `locale`,
 `personalize`, a per-request `includeWatched`, and `excludeItemIds`. The "show more" button sends
@@ -313,8 +438,12 @@ embedding dropdown may add `?capability=embedding` when the service supports it.
 
 ## Compatibility
 
-Jellyfin **10.11** (`targetAbi 10.11.0.0`), .NET 9. The plugin builds against the 10.11.0 package,
-so one DLL loads on every 10.11.x server. Verified on 10.11.1 and 10.11.8.
+Version 1.2.0.0 requires Jellyfin **12.0 or newer** (`targetAbi 12.0.0.0`), .NET 10. The plugin
+builds against the 12.0.0 package, so one DLL loads on every 12.0.x and 12.1.x server so far.
+
+Jellyfin **10.11** servers are not affected by this upgrade: the plugin catalog's manifest lists
+both versions, and Jellyfin installs whichever one matches the running server, so a 10.11 install
+keeps getting version 1.1.1.0 (`targetAbi 10.11.0.0`, .NET 9) automatically.
 
 ## Screens
 
