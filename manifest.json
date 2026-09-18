@@ -9,19 +9,11 @@
         "imageUrl": "",
         "versions": [
             {
-                "version": "1.1.2.0",
-                "changelog": "The search button works right after install on every setup. The plugin now adds its script tag to the web page while Jellyfin serves it, so Jellyfin no longer needs write access to its own web files, which are read-only on the linuxserver image, distro packages and Docker setups that run Jellyfin as a normal user. It also works when Jellyfin runs under a base URL. Same build for 10.11 and 12. Tested on fresh installs of the linuxserver 12.1 and 10.11.8 images and the official 10.11.0, 10.11.11, 12.0 and 12.1 images, with no manual step.",
-                "targetAbi": "10.11.0.0",
-                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.1.2.0/ai-search_1.1.2.0.zip",
-                "checksum": "2419506591ae25d465e0c7cdcf37d9ac",
-                "timestamp": "2026-09-18T00:00:00Z"
-            },
-            {
                 "version": "1.1.1.0",
-                "changelog": "The search button now shows up on Docker images where the web folder belongs to root but index.html is writable by Jellyfin, such as linuxserver/jellyfin. The plugin used to back up index.html into that folder first and gave up on the whole injection when the copy failed. The backup is now optional. index.html itself still has to be writable by the Jellyfin user. Same build for 10.11 and 12. Tested on the linuxserver 12.1 and 10.11.8 images and the official 12.1 image.",
+                "changelog": "Bug fix when installing the plugin on a new Docker install.",
                 "targetAbi": "10.11.0.0",
                 "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.1.1.0/ai-search_1.1.1.0.zip",
-                "checksum": "04f5efcb5a696ae377f11eccdf39f55e",
+                "checksum": "fb0aa61b6a3999a337ba8272de04e74b",
                 "timestamp": "2026-09-18T00:00:00Z"
             },
             {
