@@ -10,7 +10,7 @@
         "versions": [
             {
                 "version": "1.1.1.0",
-                "changelog": "Bug fix when installing the plugin on a new Docker install.",
+                "changelog": "Fixes the search button missing on new Docker installs.",
                 "targetAbi": "10.11.0.0",
                 "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.1.1.0/ai-search_1.1.1.0.zip",
                 "checksum": "fb0aa61b6a3999a337ba8272de04e74b",
