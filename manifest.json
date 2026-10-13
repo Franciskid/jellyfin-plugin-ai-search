@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.3.0.1",
+                "changelog": "For Jellyfin 12. Fixes for the three open issues.\n\n- Newer OpenAI models work now. They refuse `max_tokens` and only accept the default temperature, so the plugin switches to `max_completion_tokens` and drops the temperature on its own, then remembers it for that model. You can also pick the field in the settings (\"Reply length limit field\"). Fixes #4.\n- You can exclude libraries from AI Search. Ticked libraries are left out of the index, the AI search popup and the AI matches in Jellyfin's search, but still show up in Jellyfin's normal title search. Fixes #3.\n- Building the index with a model that gives no embeddings (a reranker, or llama.cpp with `--pooling rank`) now stops with a clear message saying so, instead of a JSON error. If only a few titles fail, the build skips them and tells you how many. Fixes #2.",
+                "targetAbi": "12.0.0.0",
+                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.3.0.1/ai-search_1.3.0.1.zip",
+                "checksum": "0cf41f7528945eab8c9edec5465eb546",
+                "timestamp": "2026-10-13T00:00:00Z"
+            },
+            {
                 "version": "1.3.0.0",
                 "changelog": "For Jellyfin 12. Searching is much faster, and you can now see where each result comes from.\n\nWhat's new:\n- Jellyfin's own search no longer waits for AI Search. Title results show up right away.\n- AI matches get their own \"AI Search\" row under Jellyfin's results, with a short reason under each title.\n- If a chat model is set up, it writes a one-line reason for each AI match a few seconds later.\n- The plugin speaks French or English. By default it follows each user's Jellyfin language, or you can pick one in the settings.\n- The search model is loaded as soon as you open the search page, so the first search isn't slow anymore.\n- Repeated searches are almost instant, and the AI popup no longer loads your whole library before searching.\n\nFixes:\n- The search page no longer jumps up or down while results and reasons load.\n- Opening the AI search button no longer scrolls the page back to the top.\n- The search history list in the popup is back to its normal layout.\n- Remote search works again for searches made with an API key.\n- Search log files no longer start with a byte-order mark.\n\nTV and mobile apps still get AI matches mixed into Jellyfin's results, waiting at most 2 seconds for them. Jellyfin 10.11 servers stay on 1.1.1.0.",
                 "targetAbi": "12.0.0.0",

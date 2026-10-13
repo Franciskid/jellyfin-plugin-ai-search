@@ -76,6 +76,18 @@
                     <input is="emby-input" type="text" id="InterviewModel" label="&quot;Help me choose&quot; model (optional)" />
                     <div class="fieldDescription">A cheaper model for the short "Help me choose" questions. Blank reuses the model above.</div>
                 </div>
+                <div class="selectContainer">
+                    <select is="emby-select" id="ChatTokenParameter" label="Reply length limit field">
+                        <option value="auto">Automatic (max_tokens, switches when the model refuses it)</option>
+                        <option value="max_completion_tokens">max_completion_tokens (newer OpenAI models)</option>
+                        <option value="max_tokens">max_tokens (most other servers)</option>
+                        <option value="none">Don't send a limit</option>
+                    </select>
+                    <div class="fieldDescription">
+                        Newer OpenAI models refuse <code>max_tokens</code> and want <code>max_completion_tokens</code>.
+                        Automatic handles that on the first request and remembers it.
+                    </div>
+                </div>
                 </div>
                 <!-- /languageModelSection -->
 
@@ -174,6 +186,15 @@
                 <!-- 3. Options -->
                 <div class="verticalSection">
                     <h3 class="sectionTitle">3. Options</h3>
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel">Libraries AI Search ignores</label>
+                    <div id="ExcludedLibraries" class="checkboxList"></div>
+                    <div class="fieldDescription">
+                        Ticked libraries are left out of the index, the AI search popup and the AI matches in Jellyfin's search.
+                        They still show up in Jellyfin's normal title search. Rebuild the index after changing this to free
+                        the space they took.
+                    </div>
                 </div>
                 <div class="inputContainer" id="MaxRetrieveField">
                     <input is="emby-input" type="number" id="MaxRetrieve" label="Candidates retrieved per query" min="1" max="200" />
@@ -368,6 +389,31 @@
                 return populateSelect('AiSearch/EmbeddingModels', '#EmbeddingModel', '#EmbeddingModelHint', '#ReloadEmbeddingModels', selected);
             }
 
+            // One checkbox per library; ticked ones are excluded from AI Search.
+            function loadLibraries(excluded) {
+                var box = page.querySelector('#ExcludedLibraries');
+                var norm = function (id) { return String(id || '').replace(/-/g, '').toLowerCase(); };
+                var set = {};
+                excluded.forEach(function (id) { set[norm(id)] = true; });
+                ApiClient.getVirtualFolders().then(function (folders) {
+                    box.innerHTML = '';
+                    folders.forEach(function (f) {
+                        var label = document.createElement('label');
+                        label.style.display = 'block';
+                        var input = document.createElement('input');
+                        input.setAttribute('is', 'emby-checkbox');
+                        input.type = 'checkbox';
+                        input.setAttribute('data-library', norm(f.ItemId));
+                        input.checked = !!set[norm(f.ItemId)];
+                        var span = document.createElement('span');
+                        span.textContent = f.Name + (f.CollectionType ? ' (' + f.CollectionType + ')' : '');
+                        label.appendChild(input);
+                        label.appendChild(span);
+                        box.appendChild(label);
+                    });
+                });
+            }
+
             function loadConfig() {
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(AiSearchPluginId).then(function (cfg) {
@@ -409,6 +455,8 @@
                     applyNativeSearchOnly();
                     loadModels(cfg.Model);
                     loadEmbeddingModels(cfg.EmbeddingModel);
+                    page.querySelector('#ChatTokenParameter').value = cfg.ChatTokenParameter || 'auto';
+                    loadLibraries(cfg.ExcludedLibraryIds || []);
                     refreshIndexStatus();
                     Dashboard.hideLoadingMsg();
                 });
@@ -454,6 +502,10 @@
                     cfg.Model = page.querySelector('#Model').value;
                     cfg.ModelsEndpointUrl = page.querySelector('#ModelsEndpointUrl').value.trim();
                     cfg.InterviewModel = page.querySelector('#InterviewModel').value.trim();
+                    cfg.ChatTokenParameter = page.querySelector('#ChatTokenParameter').value || 'auto';
+                    cfg.ExcludedLibraryIds = Array.prototype.map.call(
+                        page.querySelectorAll('#ExcludedLibraries input:checked'),
+                        function (el) { return el.getAttribute('data-library'); });
                     cfg.RetrievalMode = page.querySelector('#RetrievalMode').value;
                     cfg.SearchEndpointUrl = page.querySelector('#SearchEndpointUrl').value.trim();
                     cfg.SearchApiKey = page.querySelector('#SearchApiKey').value.trim();

@@ -74,6 +74,15 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool UseModel { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets which request field carries the chat reply's token limit:
+    /// <c>"auto"</c> sends <c>max_tokens</c> and switches to
+    /// <c>max_completion_tokens</c> by itself when the model rejects it (newer
+    /// OpenAI models do), <c>"max_tokens"</c> or <c>"max_completion_tokens"</c>
+    /// force one, and <c>"none"</c> sends no limit at all.
+    /// </summary>
+    public string ChatTokenParameter { get; set; } = "auto";
+
     /// <summary>Gets or sets the model alias/id used for recommendations.</summary>
     public string Model { get; set; } = string.Empty;
 
@@ -175,6 +184,14 @@ public class PluginConfiguration : BasePluginConfiguration
     /// (both local index and remote search).
     /// </summary>
     public int MaxRetrieve { get; set; } = 40;
+
+    /// <summary>
+    /// Gets or sets the ids of libraries AI Search ignores: they are left out
+    /// of the local index, of the AI popup, and of the meaning-based matches
+    /// added to Jellyfin's own search. Their titles still show up in Jellyfin's
+    /// normal title search.
+    /// </summary>
+    public string[] ExcludedLibraryIds { get; set; } = System.Array.Empty<string>();
 
     /// <summary>Gets or sets the maximum number of recommendations returned.</summary>
     public int MaxResults { get; set; } = 10;

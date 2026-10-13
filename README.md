@@ -364,6 +364,7 @@ when you need to cap usage per user centrally. The contract is at the bottom of 
 | Model | The model that chooses titles and explains its choices. Save the URL first, then reload the dropdown. |
 | Models endpoint URL | Lists models for the dropdown. Optional. OpenAI, bare-array and Ollama shapes are all accepted. |
 | "Help me choose" model | Optional separate model for the follow-up questions. |
+| Reply length limit field | Automatic by default: sends `max_tokens`, and switches to `max_completion_tokens` when the model refuses it, like newer OpenAI models do. It also stops sending `temperature` to models that only accept the default. You can force either field, or send no limit. |
 
 **Retrieval**
 
@@ -388,6 +389,7 @@ when you need to cap usage per user centrally. The contract is at the bottom of 
 
 | Option | Effect |
 |---|---|
+| Libraries AI Search ignores | Ticked libraries are left out of the index, the popup and the AI matches in Jellyfin's search. Their titles still show up in Jellyfin's normal title search. |
 | Candidates retrieved per query | How many candidates the model chooses from. Default 40, maximum 200. More candidates give the model more choice, but take longer and can cost more. |
 | Max results | How many recommendations come back. |
 | Include titles you already watched | Off by default. |
@@ -494,6 +496,8 @@ embedding dropdown may add `?capability=embedding` when the service supports it.
 | "No models returned" | Save the URL and key first, then reload the dropdown. |
 | Index stays at 0 | Read the status line under "Build index now". It shows the last error verbatim. The scheduled task log holds the same information. |
 | Results feel random | The plugin may be searching without an index. Build the index and check for errors. With nomic, also check the prefixes. |
+| Index build fails with "returned empty (null or NaN) values" | The model behind the embeddings endpoint is not an embedding model. A reranker such as `bge-reranker-v2-m3`, or llama.cpp started with `--pooling rank`, gives no embeddings. Use an embedding model (`bge-m3`, `nomic-embed-text`, `embeddinggemma`) with `--embedding --pooling mean`. If only a few titles fail, the build skips them and says how many. |
+| Chat endpoint returns "Unsupported parameter: 'max_tokens'" | Fixed in 1.3.0.1: the plugin switches to `max_completion_tokens` by itself. Or set "Reply length limit field" to `max_completion_tokens`. |
 | Ollama returns 500 on embeddings, but short strings work | Seen on a GTX 1660 SUPER: bge-m3 returned NaN vectors on the GPU. Run the embedding model on CPU: `printf 'FROM bge-m3\nPARAMETER num_gpu 0\n' \| ollama create bge-m3-cpu -f -` |
 | Search page jumps or the AI Search row never shows | Hard-refresh the page after updating the plugin, so the browser loads the new script. |
 | Search bar missing | The plugin adds one script tag to the web client's `index.html` as Jellyfin serves it, so nothing on disk has to be writable. Check the log for `AiSearch:` lines and hard-refresh the browser. A web client served by something other than Jellyfin needs the tag by hand: `<script src="/AiSearch/ClientScript" defer></script>` |

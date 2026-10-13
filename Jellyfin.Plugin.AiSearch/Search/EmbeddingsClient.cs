@@ -84,7 +84,23 @@ public class EmbeddingsClient
             var i = 0;
             foreach (var value in embedding.EnumerateArray())
             {
-                vector[i++] = value.GetSingle();
+                // Servers write NaN as null. That happens when the model is not
+                // an embedding model (a reranker, or llama.cpp's --pooling rank)
+                // or when a GPU backend produces garbage for one input.
+                if (value.ValueKind != JsonValueKind.Number || !value.TryGetSingle(out var number) || float.IsNaN(number))
+                {
+                    throw new EmbeddingsException(
+                        "The embeddings endpoint returned empty (null or NaN) values instead of numbers. Make sure the model is an "
+                        + "embedding model, not a reranker, and that the server pools embeddings (llama.cpp: --embedding with "
+                        + "--pooling mean or cls, not rank).");
+                }
+
+                vector[i++] = number;
+            }
+
+            if (vector.Length == 0)
+            {
+                throw new EmbeddingsException("The embeddings endpoint returned an empty vector. Make sure the model is an embedding model.");
             }
 
             var index = row.TryGetProperty("index", out var indexElement) && indexElement.ValueKind == JsonValueKind.Number

@@ -97,6 +97,7 @@ public class AiSearchController : ControllerBase
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly SemanticRetriever _semanticRetriever;
     private readonly SemanticWarmer _warmer;
+    private readonly LibraryScope _scope;
     private readonly RemoteSearchClient _remoteSearchClient;
     private readonly DirectChatClient _directChat;
     private readonly IPlaylistManager _playlistManager;
@@ -113,6 +114,7 @@ public class AiSearchController : ControllerBase
         IHttpClientFactory httpClientFactory,
         SemanticRetriever semanticRetriever,
         SemanticWarmer warmer,
+        LibraryScope scope,
         RemoteSearchClient remoteSearchClient,
         DirectChatClient directChat,
         IPlaylistManager playlistManager,
@@ -127,6 +129,7 @@ public class AiSearchController : ControllerBase
         _httpClientFactory = httpClientFactory;
         _semanticRetriever = semanticRetriever;
         _warmer = warmer;
+        _scope = scope;
         _remoteSearchClient = remoteSearchClient;
         _directChat = directChat;
         _playlistManager = playlistManager;
@@ -531,12 +534,12 @@ public class AiSearchController : ControllerBase
     // signals. Only those paths need it; semantic retrieval does not.
     private LibraryView LoadLibraryView(Jellyfin.Database.Implementations.Entities.User user, BaseItemKind[] scopeKinds, bool includeWatched, HashSet<Guid> exclude, bool personalize)
     {
-        var all = _libraryManager.GetItemList(new InternalItemsQuery(user)
+        var all = _scope.Filter(Config, _libraryManager.GetItemList(new InternalItemsQuery(user)
         {
             IncludeItemTypes = scopeKinds,
             Recursive = true,
             IsVirtualItem = false
-        });
+        }));
 
         var view = new LibraryView(all);
         foreach (var item in all)
@@ -597,8 +600,8 @@ public class AiSearchController : ControllerBase
         });
 
         return (
-            favorites.Where(i => !string.IsNullOrWhiteSpace(i.Name)).Select(TitleYear).ToList(),
-            watched.Where(i => !string.IsNullOrWhiteSpace(i.Name)).Select(TitleYear).ToList());
+            _scope.Filter(Config, favorites).Where(i => !string.IsNullOrWhiteSpace(i.Name)).Select(TitleYear).ToList(),
+            _scope.Filter(Config, watched).Where(i => !string.IsNullOrWhiteSpace(i.Name)).Select(TitleYear).ToList());
     }
 
     // Maps ranked ids back to items the user may see, in rank order, applying
@@ -613,7 +616,8 @@ public class AiSearchController : ControllerBase
         HashSet<Guid> exclude,
         int maxRetrieve)
     {
-        var ids = rankedIds.Where(id => !exclude.Contains(id)).Distinct().ToArray();
+        var excludedLibraries = _scope.ExcludedItemIds(Config);
+        var ids = rankedIds.Where(id => !exclude.Contains(id) && !excludedLibraries.Contains(id)).Distinct().ToArray();
         if (ids.Length == 0)
         {
             return null;

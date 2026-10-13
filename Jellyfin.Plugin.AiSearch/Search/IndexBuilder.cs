@@ -33,6 +33,7 @@ public class IndexBuilder
     private readonly EmbeddingsClient _embeddings;
     private readonly VectorIndex _index;
     private readonly VectorIndexStore _store;
+    private readonly LibraryScope _scope;
     private readonly ILogger<IndexBuilder> _logger;
     private int _building;
 
@@ -42,6 +43,7 @@ public class IndexBuilder
     /// <param name="embeddings">Embeddings client.</param>
     /// <param name="index">The in-memory index to swap on success.</param>
     /// <param name="store">The on-disk persistence.</param>
+    /// <param name="scope">Leaves out libraries excluded from AI Search.</param>
     /// <param name="logger">Logger.</param>
     public IndexBuilder(
         ILibraryManager libraryManager,
@@ -49,6 +51,7 @@ public class IndexBuilder
         EmbeddingsClient embeddings,
         VectorIndex index,
         VectorIndexStore store,
+        LibraryScope scope,
         ILogger<IndexBuilder> logger)
     {
         _libraryManager = libraryManager;
@@ -56,6 +59,7 @@ public class IndexBuilder
         _embeddings = embeddings;
         _index = index;
         _store = store;
+        _scope = scope;
         _logger = logger;
     }
 
@@ -123,6 +127,7 @@ public class IndexBuilder
             Recursive = true,
             IsVirtualItem = false,
         }).Where(item => !string.IsNullOrWhiteSpace(item.Name)).ToList();
+        items = _scope.Filter(Plugin.Instance!.Configuration, items).ToList();
 
         // Reuse vectors whose document (and model/prefix) did not change.
         var previous = ReusableEntries(target.Model);
@@ -143,34 +148,87 @@ public class IndexBuilder
         }
 
         var dimensions = entries.Count > 0 ? entries[0].Vector.Length : 0;
+        var embedded = 0;
+        var skipped = new List<string>();
+        EmbeddingsException? firstError = null;
         for (var offset = 0; offset < pending.Count; offset += EmbedBatchSize)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var batch = pending.GetRange(offset, Math.Min(EmbedBatchSize, pending.Count - offset));
-            var vectors = await _embeddings
-                .EmbedAsync(target, batch.ConvertAll(entry => entry.Text), cancellationToken)
-                .ConfigureAwait(false);
+            List<float[]?> vectors;
+            try
+            {
+                vectors = (await _embeddings
+                    .EmbedAsync(target, batch.ConvertAll(entry => entry.Text), cancellationToken)
+                    .ConfigureAwait(false)).ConvertAll(v => (float[]?)v);
+            }
+            catch (EmbeddingsException ex)
+            {
+                // One bad title (NaN on some GPU backends) must not sink the whole
+                // build: embed this batch one title at a time and skip the ones
+                // that still fail. If nothing at all works, report why.
+                firstError ??= ex;
+                vectors = new List<float[]?>(batch.Count);
+                foreach (var entry in batch)
+                {
+                    try
+                    {
+                        vectors.Add((await _embeddings.EmbedAsync(target, new[] { entry.Text }, cancellationToken).ConfigureAwait(false))[0]);
+                    }
+                    catch (EmbeddingsException)
+                    {
+                        vectors.Add(null);
+                    }
+                }
+            }
+
             for (var i = 0; i < batch.Count; i++)
             {
-                VectorMath.NormalizeInPlace(vectors[i]);
-                dimensions = vectors[i].Length;
-                entries.Add(new IndexEntry(batch[i].Item.Id, batch[i].Hash, vectors[i]));
+                var vector = vectors[i];
+                if (vector is null || (dimensions > 0 && vector.Length != dimensions))
+                {
+                    skipped.Add(batch[i].Item.Name);
+                    continue;
+                }
+
+                VectorMath.NormalizeInPlace(vector);
+                dimensions = vector.Length;
+                entries.Add(new IndexEntry(batch[i].Item.Id, batch[i].Hash, vector));
+                embedded++;
+            }
+
+            // Every title of the first batches failing means the endpoint, not
+            // the titles, is the problem: stop early with its explanation.
+            if (embedded == 0 && skipped.Count >= Math.Min(pending.Count, EmbedBatchSize * 2) && firstError is not null)
+            {
+                throw firstError;
             }
 
             progress?.Report(100.0 * Math.Min(offset + batch.Count, pending.Count) / Math.Max(1, pending.Count));
+        }
+
+        if (skipped.Count > 0)
+        {
+            _logger.LogWarning(
+                "AiSearch: {Count} titles could not be embedded and were left out of the index ({Error}). First ones: {Titles}",
+                skipped.Count,
+                firstError?.Message,
+                string.Join(", ", skipped.Take(10)));
         }
 
         var snapshot = new IndexSnapshot(target.Model, dimensions, DateTime.UtcNow, entries);
         _index.Replace(snapshot);
         _store.Save(snapshot);
         _logger.LogInformation(
-            "AiSearch: semantic index built, {Embedded} embedded, {Reused} reused, {Total} total ({Model}).",
-            pending.Count,
-            entries.Count - pending.Count,
+            "AiSearch: semantic index built, {Embedded} embedded, {Reused} reused, {Skipped} skipped, {Total} total ({Model}).",
+            embedded,
+            entries.Count - embedded,
+            skipped.Count,
             entries.Count,
             target.Model);
         progress?.Report(100);
-        return new IndexBuildResult(startedAt, DateTime.UtcNow, pending.Count, entries.Count - pending.Count, entries.Count, null);
+        var warning = skipped.Count > 0 ? $"{skipped.Count} titles were skipped: {firstError?.Message}" : null;
+        return new IndexBuildResult(startedAt, DateTime.UtcNow, embedded, entries.Count - embedded, entries.Count, warning);
     }
 
     private Dictionary<Guid, IndexEntry> ReusableEntries(string model)

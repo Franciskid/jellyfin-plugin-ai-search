@@ -63,18 +63,21 @@ public sealed class SemanticMatcher
     private readonly RemoteSearchClient _remoteSearchClient;
     private readonly ILibraryManager _libraryManager;
     private readonly SemanticWarmer _warmer;
+    private readonly LibraryScope _scope;
 
     /// <summary>Initializes a new instance of the <see cref="SemanticMatcher"/> class.</summary>
     /// <param name="retriever">The local index retriever.</param>
     /// <param name="remoteSearchClient">The remote search endpoint client.</param>
     /// <param name="libraryManager">Library manager, for loading and visibility-checking hits.</param>
     /// <param name="warmer">Told whenever the backend answered, so it is known to be warm.</param>
-    public SemanticMatcher(SemanticRetriever retriever, RemoteSearchClient remoteSearchClient, ILibraryManager libraryManager, SemanticWarmer warmer)
+    /// <param name="scope">Leaves out libraries excluded from AI Search.</param>
+    public SemanticMatcher(SemanticRetriever retriever, RemoteSearchClient remoteSearchClient, ILibraryManager libraryManager, SemanticWarmer warmer, LibraryScope scope)
     {
         _retriever = retriever;
         _remoteSearchClient = remoteSearchClient;
         _libraryManager = libraryManager;
         _warmer = warmer;
+        _scope = scope;
     }
 
     private static string ClientVersion =>
@@ -134,6 +137,15 @@ public sealed class SemanticMatcher
         }
 
         _warmer.MarkUsed();
+
+        // An index built before a library was excluded, or a remote service,
+        // can still return its titles: drop them here.
+        var excluded = _scope.ExcludedItemIds(config);
+        if (ranked is not null && excluded.Count > 0)
+        {
+            ranked = ranked.Where(h => !excluded.Contains(h.ItemId)).ToList();
+        }
+
         if (ranked is null || ranked.Count == 0)
         {
             return result;
