@@ -258,7 +258,7 @@
     '.ais-fab:hover{border-color:' + ACCENT + ';background:#191c21;transform:translateY(-1px)}' +
     '.ais-fab .ais-ic{width:22px;height:22px}' +
 
-    '.ais-overlay{position:fixed;inset:0;z-index:1001;background:rgba(0,0,0,.58);' +
+    '.ais-overlay{position:fixed;inset:0;z-index:1001;background:rgba(0,0,0,.58);overscroll-behavior:contain;' +
       'display:flex;align-items:flex-start;justify-content:center;padding:9vh 16px 24px}' +
 
     '.ais-panel{--acc:' + ACCENT + ';width:100%;max-width:580px;max-height:82vh;display:flex;flex-direction:column;position:relative;' +
@@ -432,13 +432,19 @@
       'box-shadow:0 0 0 1px rgba(255,255,255,.07);transition:box-shadow .15s,transform .15s}' +
     '.ais-rcard.wide .ais-rimg{aspect-ratio:16/9}' +
     '.ais-rcard:hover .ais-rimg,.ais-rcard:focus .ais-rimg{transform:translateY(-3px);box-shadow:0 0 0 2px ' + ACCENT + '}' +
-    '.ais-rname{font-size:13px;font-weight:600;margin-top:8px;line-height:1.3;color:#eef1f4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-    '.ais-rmeta{font-size:11.5px;color:#7d848e;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-    '.ais-rwhy{display:flex;gap:5px;align-items:flex-start;font-size:12px;line-height:1.38;color:#84d6f2;margin-top:6px}' +
+    // Every text slot has a fixed height, so a card never changes size when
+    // its reason arrives, and the row never pushes the page around.
+    '.ais-rname{font-size:13px;font-weight:600;margin-top:8px;line-height:17px;height:17px;color:#eef1f4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    '.ais-rmeta{font-size:11.5px;color:#7d848e;margin-top:1px;line-height:15px;height:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    '.ais-rwhy{display:flex;gap:5px;align-items:flex-start;font-size:12px;line-height:16px;height:48px;color:#84d6f2;margin-top:6px;overflow:hidden}' +
     '.ais-rwhy .ais-ic{width:12px;height:12px;flex:none;margin-top:2px}' +
-    '.ais-rwhy span{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}' +
-    '.ais-rsnip{font-size:11.5px;line-height:1.4;color:#8f969f;margin-top:4px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}' +
-    '.ais-rloading{display:flex;align-items:center;gap:10px;padding:6px 3.3% 14px;font-size:13px;color:#8f969f}' +
+    '.ais-rwhy span{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;transition:opacity .25s}' +
+    '.ais-rsnip{font-size:11.5px;line-height:16px;height:48px;color:#8f969f;margin-top:4px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}' +
+    '.ais-rcard.sk{cursor:default}' +
+    '.ais-rcard.sk .ais-rimg{animation:ais-pulse 1.4s ease-in-out infinite}' +
+    '.ais-rcard.sk .ais-rname,.ais-rcard.sk .ais-rmeta{background:#20242b;width:70%}' +
+    '.ais-rcard.sk .ais-rmeta{width:45%}' +
+    '@keyframes ais-pulse{50%{opacity:.55}}' +
     '@media (prefers-reduced-motion:reduce){.ais-panel,.ais-inputwrap{animation:none!important}.ais-spin{animation-duration:1.2s}}';
 
     function injectStyles() {
@@ -513,18 +519,26 @@
         if (overlay && overlay.parentNode) { overlay.parentNode.removeChild(overlay); }
         overlay = null; els = {};
         document.removeEventListener('keydown', onKey);
-        document.documentElement.style.overflow = prevHtmlOverflow;
     }
 
-    var prevHtmlOverflow = '';
+    // The page behind the popup must not scroll, but locking it with
+    // overflow:hidden on <html> makes Jellyfin lose the user's place. Instead,
+    // swallow wheel and touch scrolling that would leave the popup's own list.
+    function keepScrollInPanel(e) {
+        var body = els.body;
+        var inside = body && body.contains(e.target);
+        if (!inside) { e.preventDefault(); return; }
+        if (e.type !== 'wheel') { return; }
+        var atTop = body.scrollTop <= 0;
+        var atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 1;
+        if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) { e.preventDefault(); }
+    }
 
     function onKey(e) { if (overlay && e.key === 'Escape') { closePanel(); } }
 
     function openPanel() {
         if (overlay) { return; }
         warmUp();
-        prevHtmlOverflow = document.documentElement.style.overflow;
-        document.documentElement.style.overflow = 'hidden';
         var s = t();
         overlay = document.createElement('div');
         overlay.className = 'ais-overlay';
@@ -541,6 +555,9 @@
         document.body.appendChild(overlay);
 
         els.panel = overlay.querySelector('.ais-panel');
+        els.body = overlay.querySelector('.ais-body');
+        overlay.addEventListener('wheel', keepScrollInPanel, { passive: false });
+        overlay.addEventListener('touchmove', keepScrollInPanel, { passive: false });
         els.back = overlay.querySelector('.ais-back');
         els.composer = overlay.querySelector('.ais-composer');
         els.content = overlay.querySelector('.ais-content');
@@ -617,7 +634,7 @@
         input.addEventListener('input', function () { autoGrow(input); });
         input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } });
         autoGrow(input);
-        if (focus !== false) { setTimeout(function () { input.focus(); }, 60); }
+        if (focus !== false) { setTimeout(function () { input.focus({ preventScroll: true }); }, 60); }
         return input;
     }
 
@@ -792,8 +809,8 @@
             wireSaveBar(results);
         }
         var inp = existing.querySelector('.ais-savein');
-        if (inp) { inp.focus(); inp.select(); }
-        existing.scrollIntoView({ block: 'nearest' });
+        if (inp) { inp.focus({ preventScroll: true }); inp.select(); }
+        if (els.body) { els.body.scrollTop = 0; }
     }
 
     function renderResults(data, collection) {
@@ -1162,7 +1179,7 @@
             var meta = [];
             if (wide) {
                 var se = (it.seasonNumber != null ? 'S' + it.seasonNumber : '') + (it.episodeNumber != null ? 'E' + it.episodeNumber : '');
-                meta.push((se ? se + ' · ' : '') + it.name);
+                meta.push((se ? se + ' \u00b7 ' : '') + it.name);
             } else {
                 if (it.year) { meta.push(it.year); }
                 meta.push(typeLabel(it.type));
@@ -1170,18 +1187,49 @@
             var why = it.reason || it.why || '';
             var img = '';
             try { img = api().getImageUrl(it.id, { type: 'Primary', maxHeight: wide ? 240 : 360, quality: 90 }); } catch (e) { /* no image */ }
-            return '<div class="ais-rcard' + (wide ? ' wide' : '') + '" data-id="' + esc(it.id) + '" tabindex="0" title="' + esc(title + (why ? '\n' + why : '')) + '">' +
+            return '<div class="ais-rcard' + (wide ? ' wide' : '') + '" data-id="' + esc(it.id) + '" tabindex="0" title="' + esc(title) + '">' +
                 '<div class="ais-rimg" style="background-image:url(\'' + esc(img) + '\')"></div>' +
                 '<div class="ais-rname">' + esc(title) + '</div>' +
-                '<div class="ais-rmeta">' + esc(meta.join(' · ')) + '</div>' +
-                (why ? '<div class="ais-rwhy">' + IC.sparkle + '<span>' + esc(why) + '</span></div>' : '') +
-                (!it.reason && it.snippet ? '<div class="ais-rsnip">' + esc(it.snippet) + '</div>' : '') +
+                '<div class="ais-rmeta">' + esc(meta.join(' \u00b7 ')) + '</div>' +
+                '<div class="ais-rwhy">' + IC.sparkle + '<span>' + esc(why) + '</span></div>' +
+                '<div class="ais-rsnip">' + esc(it.snippet || '') + '</div>' +
                 '</div>';
+        }
+
+        function skeletonHtml() {
+            var card = '<div class="ais-rcard sk"><div class="ais-rimg"></div><div class="ais-rname"></div><div class="ais-rmeta"></div>' +
+                '<div class="ais-rwhy"></div><div class="ais-rsnip"></div></div>';
+            return new Array(7).join(card);
         }
 
         function removeRow() {
             var row = document.getElementById('ais-airow');
             if (row && row.parentNode) { row.parentNode.removeChild(row); }
+        }
+
+        function createRow() {
+            var row = document.createElement('div');
+            row.id = 'ais-airow';
+            row.className = 'ais-airow';
+            row.addEventListener('click', function (e) {
+                var card = e.target.closest && e.target.closest('.ais-rcard:not(.sk)');
+                if (card) { navigate(card.getAttribute('data-id')); }
+            });
+            row.addEventListener('keydown', function (e) {
+                var card = e.target.closest && e.target.closest('.ais-rcard:not(.sk)');
+                if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); navigate(card.getAttribute('data-id')); }
+            });
+            return row;
+        }
+
+        // Swaps the reasons in place once the model has written them, so the
+        // cards (and the scroll position) stay exactly where they are.
+        function patchReasons(row, entry) {
+            entry.items.forEach(function (it) {
+                if (!it.reason) { return; }
+                var span = row.querySelector('.ais-rcard[data-id="' + it.id + '"] .ais-rwhy span');
+                if (span && span.textContent !== it.reason) { span.textContent = it.reason; }
+            });
         }
 
         function render() {
@@ -1190,47 +1238,40 @@
             var term = currentTerm();
             if (!state.enabled || !isSearchPage() || !page || !term) { removeRow(); return; }
 
-            // Jellyfin's own outcome: result rows, or its "no results" message.
-            var results = page.querySelector('.searchResults') || page.querySelector('.noItemsMessage');
             var entry = cache[term];
-            if (!results || !entry) { removeRow(); return; }
-            if (entry.status === 'done' && !entry.items.length) { removeRow(); return; }
+            var row = document.getElementById('ais-airow');
+
+            // A finished search with no meaning match: no row at all.
+            if (entry && entry.status === 'done' && !entry.items.length) { removeRow(); return; }
+
+            // Anchor under Jellyfin's own outcome (its result rows or its "no
+            // results" message). While Jellyfin reloads, keep an existing row
+            // where it is rather than pulling it out of the page.
+            var results = page.querySelector('.searchResults') || page.querySelector('.noItemsMessage');
+            if (!row && (!results || !entry)) { return; }
+            if (!row) { row = createRow(); }
 
             var s = t();
-            var body = entry.status === 'pending'
-                ? '<div class="ais-rloading"><span class="ais-spin"></span>' + esc(s.rowLoading) + '</div>'
-                : '<div class="ais-rscroll">' + entry.items.map(cardHtml).join('') + '</div>';
-            var key = term + '|' + entry.status + '|' + entry.items.map(function (it) { return it.id + (it.reason ? '+' : ''); }).join(',');
+            var ready = entry && entry.status === 'done';
+            var structure = term + '|' + (ready ? entry.items.map(function (it) { return it.id; }).join(',') : 'loading');
+            if (row.getAttribute('data-structure') !== structure) {
+                var heading = '<h2 class="sectionTitle sectionTitle-cards padded-left padded-right ais-rowtitle">' + IC.sparkle +
+                    '<span>' + esc(s.rowTitle) + '</span><span class="ais-rowsub">' + esc(s.rowSub(term)) + '</span></h2>';
+                row.innerHTML = heading + '<div class="ais-rscroll"' + (ready ? '' : ' aria-busy="true" aria-label="' + esc(s.rowLoading) + '"') + '>' +
+                    (ready ? entry.items.map(cardHtml).join('') : skeletonHtml()) + '</div>';
+                row.setAttribute('data-structure', structure);
+            }
+            if (ready) { patchReasons(row, entry); }
 
-            var row = document.getElementById('ais-airow');
-            if (!row) {
-                row = document.createElement('div');
-                row.id = 'ais-airow';
-                row.className = 'ais-airow';
-                row.addEventListener('click', function (e) {
-                    var card = e.target.closest && e.target.closest('.ais-rcard');
-                    if (card) { navigate(card.getAttribute('data-id')); }
-                });
-                row.addEventListener('keydown', function (e) {
-                    var card = e.target.closest && e.target.closest('.ais-rcard');
-                    if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); navigate(card.getAttribute('data-id')); }
-                });
-            }
-            if (row.getAttribute('data-key') !== key) {
-                var scroll = row.querySelector('.ais-rscroll');
-                var left = scroll && row.getAttribute('data-term') === term ? scroll.scrollLeft : 0;
-                row.innerHTML = '<h2 class="sectionTitle sectionTitle-cards padded-left padded-right ais-rowtitle">' + IC.sparkle +
-                    '<span>' + esc(s.rowTitle) + '</span><span class="ais-rowsub">' + esc(s.rowSub(term)) + '</span></h2>' + body;
-                row.setAttribute('data-key', key);
-                row.setAttribute('data-term', term);
-                var next = row.querySelector('.ais-rscroll');
-                if (next && left) { next.scrollLeft = left; }
-            }
-            if (row.previousElementSibling !== results) {
+            // Only move the row when it is not already somewhere after the
+            // results: other scripts may add their own blocks below them, and
+            // fighting over the exact spot makes the page twitch.
+            if (results && (row.parentNode !== results.parentNode
+                || !(results.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING))) {
                 results.parentNode.insertBefore(row, results.nextSibling);
             }
 
-            if (entry.status === 'done' && lastTerm === term && !entry.explainQueued) {
+            if (ready && lastTerm === term && !entry.explainQueued) {
                 entry.explainQueued = true;
                 setTimeout(function () { if (currentTerm() === term) { explain(term); } else { entry.explainQueued = false; } }, 900);
             }

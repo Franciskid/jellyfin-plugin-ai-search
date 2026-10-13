@@ -1,90 +1,123 @@
 # AI Search for Jellyfin
 
-Describe what you want to watch, and the plugin searches your Jellyfin library for a match.
-It finds relevant titles, then asks a language model to pick the best ones and explain each choice.
-The same retrieval also plugs into Jellyfin's own search: in the web client, meaning-based matches
-show up in their own "AI Search" row under the ordinary title matches, each with the reason it
-was found, without slowing those title matches down.
+Search your Jellyfin library by describing what you want instead of typing a title. "Something
+tense at sea", "the Kaamelott episode with the Grail", "a feel-good 90s comedy". The plugin finds
+the titles in your library that fit, and tells you why each one came up.
+
+It works in two places:
+
+- **Jellyfin's own search.** Title matches show up as usual, and right below them an "AI Search"
+  row lists the titles that match what you meant, even when their title has none of your words.
+- **An AI search button** in the web client. You describe what you feel like watching, and a
+  language model picks from your library and writes a line about each pick.
 
 `Jellyfin 12.0+` · `.NET 10` · `no database` · `any OpenAI-compatible endpoint` · `runs fully offline with Ollama`
 
-Versions 1.2.0.0 and later require Jellyfin 12.0 or newer. Jellyfin 10.11 servers keep getting version
-1.1.1.0 from the plugin catalog automatically; the repository's manifest lists both versions and
-Jellyfin picks the one that matches the running server.
+Versions 1.2.0.0 and later need Jellyfin 12.0 or newer. Jellyfin 10.11 servers keep getting
+1.1.1.0 from the catalog, Jellyfin picks the version that matches the server.
 
-```
-"something tense and short for tonight, like Sicario"
-"films about Native Americans"
-"a movie with both DiCaprio and Brad Pitt"
-"the Game of Thrones episode with a wedding"
-```
+## What it looks like
 
-<img width="1200" height="748" alt="AI Search in the Jellyfin web client" src="https://github.com/user-attachments/assets/db1fdfa3-b91a-4ba0-b75e-da396df542f5" />
+Searching "jaws". Jellyfin finds the film by its title. The AI Search row underneath finds the
+other shark films, and each card says why it is there.
 
----
+<img width="1200" alt="Jellyfin search for jaws: the title match, then the AI Search row with shark films and a reason under each" src="docs/images/search-row-title-match.jpg" />
 
-## Why an index
+When no title matches at all, Jellyfin says so and the row still has answers.
 
-The first version of this plugin sent a list of titles to the model and asked it to choose. That
-limits what it can find. If you have 3000 movies but only send the 300 top-rated titles, the model
-never gets a chance to recommend the other 2700.
+<img width="1200" alt="Search for stranded alone in space: Jellyfin finds nothing, the AI Search row lists The Martian, Gravity, Moon and others" src="docs/images/search-row-no-title-match.jpg" />
 
-The plugin now builds an index that lets it search by meaning. An embedding model converts each
-title's metadata into numbers that can be compared with your query. The plugin searches the whole
-index and sends the closest 40 matches to the language model, along with their cast and synopsis.
-That gives the model enough context to make useful choices.
+The AI search button opens a popup for longer requests. Here the model picked six films from the
+library and wrote a reason for each.
 
-## Pipeline
+<img width="450" alt="The AI search popup answering a tense survival story at sea" src="docs/images/popup-results.jpg" />
+
+These screenshots come from a small test library of 35 films. More from a real library are at the
+[bottom of this page](#screens).
+
+## How it works
+
+Every movie, show and episode gets turned into an embedding: a list of numbers that captures what
+the title is about, built from its name, genres, tags, cast and synopsis. An embedding model does
+this once for the whole library, then again each night for whatever changed. The result is a
+single file in Jellyfin's data folder.
+
+When you search, your words go through the same model, and the plugin compares them with every
+title in the library to find the closest ones. There is no vector database. Comparing a search
+with 18,000 titles takes about 2 ms, so a plain scan is enough.
+
+What happens next depends on where you searched.
+
+**On Jellyfin's search page**, the closest titles go into the AI Search row. Titles Jellyfin
+already found by name are left out, so nothing shows twice. Each card first gets a quick reason:
+which of your words appear in its synopsis, genres, tags, cast or title. If you set up a chat
+model, it then writes a short sentence for each card a few seconds later and replaces the quick
+one. Jellyfin's own results never wait for any of this, because the row is loaded separately.
+
+**In the popup**, the 40 closest titles go to the chat model with their cast and synopsis, plus
+your favorites and watch history if you want it personal. The model picks the best ones and
+explains each pick. It can only answer with numbers from that list, so it cannot invent a film
+you don't have, or one you are not allowed to see.
+
+If you already run a service that indexes your library, the plugin can ask it for matches instead
+of keeping its own index. See [Remote retrieval](#remote-retrieval).
 
 ```mermaid
 flowchart LR
-  A["Query<br/>(Jellyfin session)"] --> B{"Retrieval"}
-  B -->|local| C["Vector index<br/>(in memory)"]
-  B -->|remote| D["Search endpoint"]
-  C --> E["Prompt builder<br/>+ chat model"]
+  A["Your search"] --> B{"Retrieval"}
+  B -->|local| C["Index in memory"]
+  B -->|remote| D["Your search service"]
+  C --> E["AI Search row<br/>(quick reasons, then the model's)"]
   D --> E
-  E --> F["Library items<br/>+ reasons"]
+  C --> F["Popup: chat model<br/>picks and explains"]
+  D --> F
 ```
 
-1. The injected client script calls the plugin with the user's existing Jellyfin session. No API
-   key and no endpoint URL reach the browser.
-2. The plugin collects the titles the user can access, along with their watch history and
-   favorites. Jellyfin's per-user access restrictions apply here.
-3. The local index or a remote search service returns the closest matches.
-4. The plugin removes titles the user cannot access, titles already shown, and watched titles
-   unless the user has chosen to include them.
-5. The prompt builder writes one line per candidate: `index | title (year) | genres | cast | synopsis`.
-6. The model answers with strict JSON and selects candidates **by index only**. It cannot return a
-   title that you do not own.
-7. The plugin maps the indices back to Jellyfin items and returns posters, titles, years and reasons.
+### Why an index
 
-If the index or search service is unavailable, the plugin sends a selection from the library
-instead. If the model rejects `response_format`, it retries without that option. It also handles
-JSON replies wrapped in Markdown code fences.
+The first version of this plugin sent a list of titles to the model and asked it to choose. That
+limits what it can find. If you have 3000 movies but only send the 300 best rated, the model never
+gets a chance to recommend the other 2700. With an index, the whole library is searched every
+time, and the model only gets the 40 titles that are actually close to what you asked.
 
-## Design decisions
+### The popup, step by step
+
+1. The client script calls the plugin with your existing Jellyfin session. No API key and no
+   endpoint URL ever reach the browser.
+2. The local index or the remote service returns the closest titles.
+3. The plugin drops titles you cannot access, titles already shown, and watched titles unless
+   you asked to include them.
+4. Each remaining title becomes one line for the model: `index | title (year) | genres | cast | synopsis`.
+5. The model answers in JSON and picks by index only.
+6. The plugin maps the picks back to your library and shows posters, titles, years and reasons.
+
+If the index or the search service is down, the plugin sends a slice of the library instead. If
+the model refuses `response_format`, it tries again without it, and it copes with JSON wrapped in
+Markdown code fences.
+
+### Design decisions
 
 | Decision | Reason |
 |---|---|
-| Brute-force scan, no vector database | Searching 18000 vectors with 1024 dimensions takes milliseconds. At this library size, a separate database would add setup and maintenance without much benefit. |
-| Plain float loop, no SIMD package | The scan is already fast enough. Keeping dependencies simple makes the plugin easier to run across Jellyfin platforms. |
-| Vectors normalized once, at index time | Cosine similarity becomes a dot product. The query path does no division. |
-| One binary file in Jellyfin's data folder | The index loads at startup and survives a restart. Restarting does not require rebuilding the embeddings. |
-| Immutable snapshot, swapped atomically | A rebuild replaces one reference. Searches keep using the previous index until the new one is ready. |
-| SHA-256 content hash per document | The nightly build re-embeds only the titles whose metadata changed. If nothing changed, no new embeddings are needed. |
-| The hash covers the model id and the prefix | Change the embedding model and every vector is invalidated on the next build. Vectors from two models cannot mix. |
-| The model selects by index | The model cannot invent a title. It also cannot return a title the user is not allowed to see, because the candidate list is built from that user's own item list. |
-| Retrieval failure falls back to a catalog slice | If the index or embedding service is unavailable, the model can still choose from a smaller selection of library titles. |
+| Brute-force scan, no vector database | A search against 18,000 vectors takes about 2 ms. A database would add setup and upkeep for nothing at this size. |
+| One contiguous matrix, SIMD dot products | Uses `System.Numerics.Vector`, which ships with .NET, so there is no extra dependency. About 6 times faster than the first version's plain loop. |
+| Vectors normalized once, at index time | Cosine similarity becomes a dot product. A search does no division. |
+| One binary file in Jellyfin's data folder | The index loads at startup and survives a restart without re-embedding anything. |
+| Immutable snapshot, swapped in one step | A rebuild replaces one reference. Searches keep using the old index until the new one is ready. |
+| SHA-256 hash per title | The nightly build only re-embeds titles whose metadata changed. |
+| The hash covers the model id and the prefix | Switch embedding models and every vector is rebuilt on the next run. Vectors from two models never mix. |
+| The model picks by index | It cannot invent a title, or return one the user may not see, because the list comes from that user's own library. |
+| Search answers are cached and shared | Retyping a search, or two people searching the same thing, costs one call to the embedding service. |
 
-**Index file format (v1):**
+Index file format (v1):
 
 ```
 "AISEARCH" | version | model | built-at ticks | dimensions | count
 then per entry: item GUID (16 B) | content hash | float32 × dimensions
 ```
 
-The file is written to a temporary path and renamed, so an interrupted save cannot corrupt the
-current index.
+The file is written to a temporary path and then renamed, so a save that gets interrupted cannot
+break the current index.
 
 ## Measured on a real library
 
@@ -93,132 +126,114 @@ current index.
 | | |
 |---|---|
 | Index size | about 100 MB, one file |
-| Index scan | about 2 ms for 15000 entries × 768 dims (SIMD, one contiguous matrix) |
-| Jellyfin search in the web client | about 0.1-0.25 s, same as without the plugin (the AI row loads on its own) |
-| AI Search row | about 40-170 ms warm, model-written reasons about 3-4 s later |
-| AI popup without the model | about 0.1-0.3 s (the model call, when on, comes on top) |
+| Comparing a search with every title | about 2 ms |
+| Jellyfin search in the web client | about 0.1-0.25 s, same as without the plugin |
+| AI Search row | about 40-170 ms, the model's reasons about 3-4 s later |
+| AI popup with the model off | about 0.1-0.3 s (the model call comes on top when it is on) |
 | First build, Ollama + bge-m3 on CPU | about 40 minutes |
 | First build, OpenAI `text-embedding-3-small` | a few minutes, about $0.05 |
-| Nightly incremental build | about 1 minute, usually 0 re-embeds |
-| Tokens per search | about 7000 input, for 40 candidates with synopsis |
-| Cost per search, `mistral-medium` | about $0.01 |
-| Cost per search, local Ollama | none |
+| Nightly build | about 1 minute, usually nothing to re-embed |
+| Tokens per popup search | about 7000 input, for 40 candidates with synopsis |
+| Cost per popup search, `mistral-medium` | about $0.01 |
+| Cost with local Ollama | none |
 
 ## Features
 
 | Feature | What it does |
 |---|---|
-| **Search** | Free-text query. Matches on mood, theme, plot, cast or director. |
-| **Surprise me** | No query. The plugin sends the model a random slice of the library. With personalization enabled, it also uses your favorites and history to guide the picks. Useful for finding something you would not think to search for. |
-| **Help me choose** | The model uses what you have typed to ask 2 or 3 multiple-choice questions and narrow down the search. Your answers go back into the search. With an empty box you receive generic questions on mood, length and watch state. |
-| **Create collection** | Saves the result set as a Jellyfin playlist. Any result set can also be saved after the fact. |
-| **History** | The last 12 searches per user, stored server-side. Reopen the results or replay the search. |
-| **Movies / TV switch** | Searches series *and* individual episodes. If the query names a series you own, the scan is restricted to that series. |
-| **Personalize** | Feeds favorites, watch history and a taste profile into the prompt. Turn it off for a neutral search. |
-| **Taste profile** | The model summarizes your favorites and history in 2 to 4 sentences. The profile refreshes in the background after 7 days or when your viewing preferences change. It is stored on your server and sent only to the backend you configured. |
-| **Retrieval only** | Turn the language model off. The plugin then returns the retrieval matches ranked by similarity, without explanations or a chat model call. Embedding costs still depend on your provider. |
-
-Answers follow the web client language. French and English are detected and passed to the model.
+| **AI Search row** | Below Jellyfin's search results, the titles that match the meaning of your search, each with a reason. |
+| **Search** | Free-text query in the popup. Works on mood, theme, plot, cast or director. |
+| **Surprise me** | No query. The model gets a random slice of the library and, if personalization is on, your favorites and history. Good for finding something you would never have searched for. |
+| **Help me choose** | The model reads what you typed and asks 2 or 3 multiple-choice questions to narrow it down. With an empty box you get generic questions on mood, length and whether you have seen it. |
+| **Create collection** | Saves the results as a Jellyfin playlist. Any result set can also be saved afterwards. |
+| **History** | Your last 12 popup searches, kept on the server. Reopen the results or run the search again. |
+| **Movies / TV switch** | Searches series and single episodes. If you name a series you own, only that series is searched. |
+| **Personalize** | Adds your favorites, watch history and taste profile to the prompt. Turn it off for a neutral search. |
+| **Taste profile** | The model sums up your taste in 2 to 4 sentences. It refreshes after 7 days or when your viewing changes, and stays on your server. |
+| **Retrieval only** | Turn the language model off and get the closest titles ranked by similarity, with no model call. |
+| **French or English** | The plugin follows each user's Jellyfin language, or a language you choose for everybody. The model writes its reasons in that language too. |
 
 ## Jellyfin search integration
 
-Since 1.2.0.0, the plugin also registers itself as one of Jellyfin's own search providers
-(`ISearchProvider`, internal, priority 50). It runs alongside Jellyfin's built-in title search
-(`SqlSearchProvider`) for searches from TV and mobile apps or direct `GET /Items?searchTerm=` and
-`GET /Search/Hints` calls; the web client's search page gets the same matches in a separate row
-instead (see [The AI Search row](#the-ai-search-row-web-client)). No AI popup involved: this works even
-with **Native search only** (below) turned on, and needs no language model, only a retrieval
-source (local index or remote service).
+The plugin registers as one of Jellyfin's own search providers, next to the built-in title
+search. It needs a retrieval source (local index or remote service) but no language model, and it
+keeps working with **Native search only** turned on.
 
-How it merges with title search, for other apps:
+### In the web client
 
-- The built-in provider scores an exact title match 100, a prefix match 80, a word-prefix match
-  75, and a "contains" match 50.
-- This plugin's matches always score below 50 (`1` to `49`, based on retrieval rank), so a
-  meaning-based match never outranks an actual title match. Jellyfin merges every provider's
-  results by the best score per item, then loads and sorts them, so your matches land after title
-  matches, in whichever Movies / Shows / Episodes section the web client groups them into.
-- Covers **Movie**, **Series** and **Episode** items, the same three types the popup and the local
-  index already handle. A search restricted to other types (music, books, people, ...) gets no
-  matches from this plugin.
+Jellyfin only shows search results once every search provider has answered. If the plugin added
+its matches to that answer, a slow embedding service would hold back the title results too. So
+in the web client it doesn't. The client script marks its search requests, the plugin skips them,
+and Jellyfin's results come back as fast as without the plugin. The script then asks the plugin
+for the meaning matches on its own (`GET /AiSearch/Matches`) and shows them in the AI Search row.
 
-Scoping and access control:
+- The row always sits below Jellyfin's own rows, and shows up for every search that has meaning
+  matches.
+- Titles Jellyfin already found by name are not repeated in the row.
+- The quick reason is built from the words of your search found in the title, synopsis, genres,
+  tags, cast, studio or series name. Accents and plurals don't matter. When nothing matches word
+  for word, which is common when you search in another language than your metadata, it just says
+  the title is close in meaning.
+- With a chat model set up, the plugin asks it once per finished search for a one-line reason per
+  title (`POST /AiSearch/Explain`). Those replace the quick reasons in place, without moving the
+  cards.
+- Turn the row off and the matches are mixed into Jellyfin's rows instead, like in other apps.
 
-- Respects the search's own `includeItemTypes` / `excludeItemTypes` and `mediaTypes` filters, and
-  `parentId` (scopes to that whole subtree, e.g. one library).
-- Jellyfin trusts an internal search provider to filter by the calling user itself; this plugin
-  does that by loading each candidate through the user's own library view and checking Jellyfin's
-  standard visibility and parental-control rule (`BaseItem.IsVisibleStandalone`) before returning
-  it. An API-key call with no user context skips that per-user check, same as Jellyfin's own
-  providers do.
-- Jellyfin only answers a search once every provider has, so anything this plugin adds to the
-  merged results delays the title matches too. That is why the web client gets the meaning
-  matches separately (next section). Other apps (TV, mobile, API callers) get them merged in,
-  within a capped wait ("Longest wait for meaning-based matches in other apps", 2 seconds by
-  default). A slower backend call is not dropped: it finishes in the background and its answer is
-  cached for the next search. On a timeout or any failure this plugin contributes no matches;
-  title search is unaffected.
+### In other apps
 
-### The AI Search row (web client)
+TV and mobile apps can't show an extra row, so they get the meaning matches mixed into Jellyfin's
+results. Those matches always score below Jellyfin's lowest title match (1 to 49, against 50 and
+up), so they come after the title matches in each section. To keep searches quick, the plugin
+waits at most 2 seconds for them (adjustable). A slower answer isn't wasted: it finishes in the
+background and the next search gets it straight away.
 
-In the web client, meaning matches never touch Jellyfin's own search request. The client script
-marks its search requests with an `X-AiSearch-Row` header, the plugin's search provider steps
-aside for them, and Jellyfin's title results come back as fast as without the plugin. The script
-then asks the plugin for the meaning matches on its own (`GET /AiSearch/Matches`) and shows them
-in a separate **AI Search** row under Jellyfin's results, "related to ... by meaning, not by
-title":
+These responses also carry two headers: `X-AiSearch-Matches` lists the ids only the meaning search
+found, and `Server-Timing: aisearch;dur=...` shows how long the plugin took.
 
-- Titles Jellyfin's title search already shows are left out of the row.
-- The row shows for every search with meaning matches, whether or not Jellyfin found titles; it
-  always sits below Jellyfin's own rows, so title matches stay first.
-- Each result says why it is there. Right away, the plugin cites the words of your search found
-  in the title, synopsis, genres, tags, cast, studio or series name (accent- and plural-tolerant),
-  with a synopsis excerpt; when nothing matches word for word (often the case across languages)
-  it says the match is by meaning. Once the search settles, if a chat model is configured, it
-  writes a one-line reason per title (`POST /AiSearch/Explain`, one call per settled search,
-  cached), which replaces the instant one.
-- Turn the row off to get the matches merged into Jellyfin's rows instead, like other apps.
+### Speed
 
-Speed:
+- Searches are cached and shared. Retyping a term, going back to a previous search, or two people
+  searching the same thing at once all cost a single call to the embedding service.
+- Embedding servers like Ollama unload a model that has been idle for a few minutes, and loading it
+  again takes a second or two. The web client warns the server when you open the search page or
+  the popup (`POST /AiSearch/Warmup`), so the model is loaded by the time you have typed something.
+  Nothing happens if it was used in the last three minutes.
 
-- Query vectors (local index) and remote answers are cached and shared: identical searches running
-  at the same time, a retyped term, or "show more" cost one backend call.
-- Embedding servers such as Ollama unload an idle model after a few minutes, and reloading it used
-  to land on the first search of a session. The web client now asks the server to warm the backend
-  up when the search page or the AI popup opens (`POST /AiSearch/Warmup`), so the model loads while
-  you type. It does nothing if the backend was used in the last three minutes.
-- For other apps, an `X-AiSearch-Matches` response header on `/Items` and `/Search/Hints` lists the
-  ids only the meaning search found, and a `Server-Timing: aisearch;dur=...` entry shows the time
-  the plugin took. The search log records each result's `origin`: `title`, `semantic` or `both`.
+### Access control
 
-Options (**Dashboard → Plugins → AI Search**, "4. Jellyfin search"):
+- Each match is loaded through the user's own library view and checked with Jellyfin's usual
+  visibility and parental rules (`BaseItem.IsVisibleStandalone`) before it is shown.
+- The search's own type filters (`includeItemTypes`, `excludeItemTypes`, `mediaTypes`) and
+  `parentId` are respected. Only movies, series and episodes are matched.
+
+### Options
+
+**Dashboard → Plugins → AI Search**, section "4. Jellyfin search":
 
 | Option | Default | Effect |
 |---|---|---|
 | Add meaning-based matches to Jellyfin's search | On | Turns the feature on or off. |
-| Only for searches that look like a sentence | Off | Skips short keyword-style searches (see the minimum word count below), where meaning-based matches tend to be noisy. |
-| Minimum words to run | 3 | Used only when the option above is on. |
-| Max meaning-based matches per search | 20 | Upper bound on how many of this plugin's matches are added to one search. |
-| Longest wait for meaning-based matches in other apps (ms) | 2000 | 250-10000. Caps how long a search from a TV/mobile app can wait on the backend; a slower call finishes in the background for the next search. |
-| Show meaning-based matches in their own "AI Search" row | On | The web client row described above. Off merges the matches into Jellyfin's rows. |
-| Explain each AI Search result with the language model | On | Needs the chat model from section 1. Off keeps the instant word-match reasons. |
-| Language of the AI Search interface | Auto | Auto follows each user's Jellyfin display language, then the browser's. Français or English forces one for everybody, including the reasons the model writes. |
+| Only for searches that look like a sentence | Off | Skips short keyword searches (see the minimum word count below). |
+| Minimum words to run | 3 | Only used when the option above is on. |
+| Max meaning-based matches per search | 20 | How many titles the plugin adds to one search. |
+| Longest wait for meaning-based matches in other apps (ms) | 2000 | 250-10000. How long a search from a TV or mobile app may wait. |
+| Show meaning-based matches in their own "AI Search" row | On | The web client row. Off mixes the matches into Jellyfin's rows. |
+| Explain each AI Search result with the language model | On | Needs the chat model from section 1. Off keeps the quick reasons. |
+| Language of the AI Search interface | Auto | Auto follows each user's Jellyfin language, then the browser's. Français or English forces one for everybody, including the model's reasons. |
 | Native search only | Off | See below. |
 
 ### Native search only
 
-Turning this on hides the AI search bar and popup entirely, leaving Jellyfin's own search (now
-with meaning-based matches, if enabled above) as the only search experience.
+This hides the AI search button and popup, and leaves Jellyfin's own search (with the AI Search
+row, if it is on) as the only way to search.
 
-- The client script stays loaded only for the AI Search row (when that option is on); it shows no
-  button or popup. With the row off too, `index.html` is served without the script tag, a copy
-  already present is stripped as the page is served, and the on-disk injected copy is removed at
-  startup.
-- These endpoints, which only ever serve the popup, are refused with a bare 404: `Models`,
-  `Recommend`, `Interview`, `History` (GET and DELETE), `Playlist`.
-- These stay reachable regardless of this option, since they serve the dashboard or native search:
-  `ClientScript`, `Health`, `Warmup`, `Matches`, `Explain`, `EmbeddingModels`, `IndexStatus`,
-  `RebuildIndex`, `SearchLog`.
+- The client script stays loaded only for the AI Search row and shows no button. With the row off
+  too, `index.html` is served without the script tag, and a copy left over from before is removed.
+- These popup-only endpoints answer with an empty 404: `Models`, `Recommend`, `Interview`,
+  `History` (GET and DELETE), `Playlist`.
+- These keep working, since the dashboard or Jellyfin's search need them: `ClientScript`,
+  `Health`, `Warmup`, `Matches`, `Explain`, `EmbeddingModels`, `IndexStatus`, `RebuildIndex`,
+  `SearchLog`.
 
 ## Search log
 
@@ -480,6 +495,7 @@ embedding dropdown may add `?capability=embedding` when the service supports it.
 | Index stays at 0 | Read the status line under "Build index now". It shows the last error verbatim. The scheduled task log holds the same information. |
 | Results feel random | The plugin may be searching without an index. Build the index and check for errors. With nomic, also check the prefixes. |
 | Ollama returns 500 on embeddings, but short strings work | Seen on a GTX 1660 SUPER: bge-m3 returned NaN vectors on the GPU. Run the embedding model on CPU: `printf 'FROM bge-m3\nPARAMETER num_gpu 0\n' \| ollama create bge-m3-cpu -f -` |
+| Search page jumps or the AI Search row never shows | Hard-refresh the page after updating the plugin, so the browser loads the new script. |
 | Search bar missing | The plugin adds one script tag to the web client's `index.html` as Jellyfin serves it, so nothing on disk has to be writable. Check the log for `AiSearch:` lines and hard-refresh the browser. A web client served by something other than Jellyfin needs the tag by hand: `<script src="/AiSearch/ClientScript" defer></script>` |
 
 ## Limits
@@ -493,14 +509,16 @@ embedding dropdown may add `?capability=embedding` when the service supports it.
 
 ## Compatibility
 
-Version 1.2.0.0 requires Jellyfin **12.0 or newer** (`targetAbi 12.0.0.0`), .NET 10. The plugin
-builds against the 12.0.0 package, so one DLL loads on every 12.0.x and 12.1.x server so far.
+Versions 1.2.0.0 and later need Jellyfin **12.0 or newer** (`targetAbi 12.0.0.0`), .NET 10. The
+plugin builds against the 12.0.0 package, so the same DLL loads on every 12.0.x and 12.1.x server
+so far.
 
-Jellyfin **10.11** servers are not affected by this upgrade: the plugin catalog's manifest lists
-both versions, and Jellyfin installs whichever one matches the running server, so a 10.11 install
-keeps getting version 1.1.1.0 (`targetAbi 10.11.0.0`, .NET 9) automatically.
+Jellyfin **10.11** servers keep getting 1.1.1.0 (`targetAbi 10.11.0.0`, .NET 9). The catalog lists
+both versions and Jellyfin installs the one that matches the server.
 
 ## Screens
+
+From a real library of about 3000 films, in the AI search popup.
 
 **Theme query.** "american movie about american frontier"
 
