@@ -123,6 +123,13 @@ public sealed class SearchLogResultEntry
     /// <summary>Gets or sets a value indicating whether this item was a semantic (not title) match.</summary>
     public bool Semantic { get; set; }
 
+    /// <summary>
+    /// Gets or sets where a native-search result came from: <c>"title"</c>
+    /// (Jellyfin's own title search), <c>"semantic"</c> (only the plugin's
+    /// meaning match found it) or <c>"both"</c>. <c>null</c> for AI popup rows.
+    /// </summary>
+    public string? Origin { get; set; }
+
     /// <summary>Gets or sets the raw semantic similarity, when <see cref="Semantic"/> is <c>true</c>.</summary>
     public float? SemanticScore { get; set; }
 
@@ -150,6 +157,18 @@ public sealed class SearchLogSemanticSummary
 
     /// <summary>Gets or sets how long retrieval took, in milliseconds.</summary>
     public long DurationMs { get; set; }
+
+    /// <summary>Gets or sets the time spent on the backend (query embedding or remote endpoint), in milliseconds.</summary>
+    public long BackendMs { get; set; }
+
+    /// <summary>Gets or sets the time spent scanning the local index, in milliseconds.</summary>
+    public long ScanMs { get; set; }
+
+    /// <summary>Gets or sets the time spent loading and visibility-checking hits, in milliseconds.</summary>
+    public long LookupMs { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the backend answer came from the plugin's cache.</summary>
+    public bool Cached { get; set; }
 
     /// <summary>Gets or sets how many raw hits retrieval returned before filtering.</summary>
     public int RawHits { get; set; }

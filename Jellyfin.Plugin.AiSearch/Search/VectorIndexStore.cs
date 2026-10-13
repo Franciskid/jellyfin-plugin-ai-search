@@ -1,6 +1,6 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.Logging;
@@ -54,22 +54,33 @@ public class VectorIndexStore
             var builtAt = new DateTime(reader.ReadInt64(), DateTimeKind.Utc);
             var dimensions = reader.ReadInt32();
             var count = reader.ReadInt32();
-            var entries = new List<IndexEntry>(count);
-            for (var i = 0; i < count; i++)
+            if (dimensions < 0 || count < 0 || (long)dimensions * count > int.MaxValue)
             {
-                var itemId = new Guid(reader.ReadBytes(16));
-                var hash = reader.ReadString();
-                var vector = new float[dimensions];
-                for (var d = 0; d < dimensions; d++)
-                {
-                    vector[d] = reader.ReadSingle();
-                }
-
-                entries.Add(new IndexEntry(itemId, hash, vector));
+                _logger.LogWarning("AiSearch: index file header is invalid; it will be rebuilt.");
+                return null;
             }
 
-            _logger.LogInformation("AiSearch: loaded index of {Count} movies ({Model}, {Dims} dims).", count, model, dimensions);
-            return new IndexSnapshot(model, dimensions, builtAt, entries);
+            // Each row's floats go straight into the shared matrix as raw bytes
+            // instead of one ReadSingle call per value (millions of calls).
+            var ids = new Guid[count];
+            var hashes = new string[count];
+            var matrix = new float[count * dimensions];
+            Span<byte> guidBytes = stackalloc byte[16];
+            for (var i = 0; i < count; i++)
+            {
+                ReadExactly(reader, guidBytes);
+                ids[i] = new Guid(guidBytes);
+                hashes[i] = reader.ReadString();
+                var row = matrix.AsSpan(i * dimensions, dimensions);
+                ReadExactly(reader, MemoryMarshal.AsBytes(row));
+                if (!BitConverter.IsLittleEndian)
+                {
+                    ReverseFloatBytes(row);
+                }
+            }
+
+            _logger.LogInformation("AiSearch: loaded index of {Count} items ({Model}, {Dims} dims).", count, model, dimensions);
+            return new IndexSnapshot(model, dimensions, builtAt, ids, hashes, matrix);
         }
         catch (Exception ex)
         {
@@ -98,13 +109,45 @@ public class VectorIndexStore
             {
                 writer.Write(entry.ItemId.ToByteArray());
                 writer.Write(entry.ContentHash);
-                foreach (var value in entry.Vector)
+                if (BitConverter.IsLittleEndian)
                 {
-                    writer.Write(value);
+                    writer.Write(MemoryMarshal.AsBytes(entry.Vector.Span));
+                }
+                else
+                {
+                    foreach (var value in entry.Vector.Span)
+                    {
+                        writer.Write(value);
+                    }
                 }
             }
         }
 
         File.Move(temp, _path, overwrite: true);
+    }
+
+    private static void ReadExactly(BinaryReader reader, Span<byte> buffer)
+    {
+        while (buffer.Length > 0)
+        {
+            var read = reader.Read(buffer);
+            if (read <= 0)
+            {
+                throw new EndOfStreamException("Index file is truncated.");
+            }
+
+            buffer = buffer[read..];
+        }
+    }
+
+    // The file is little-endian (what BinaryWriter writes); only a big-endian
+    // host needs to swap the bulk-read bytes back into native floats.
+    private static void ReverseFloatBytes(Span<float> values)
+    {
+        var bytes = MemoryMarshal.AsBytes(values);
+        for (var i = 0; i < bytes.Length; i += 4)
+        {
+            bytes.Slice(i, 4).Reverse();
+        }
     }
 }

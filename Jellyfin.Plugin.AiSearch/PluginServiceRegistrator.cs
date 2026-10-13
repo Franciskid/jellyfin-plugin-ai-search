@@ -32,7 +32,13 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<EmbeddingsClient>();
         serviceCollection.AddSingleton<IndexBuilder>();
         serviceCollection.AddSingleton<SemanticRetriever>();
+        serviceCollection.AddSingleton<SemanticWarmer>();
         serviceCollection.AddHostedService<IndexStartupService>();
+
+        // Tells the web client which native search results came from the
+        // plugin's meaning match rather than Jellyfin's title search.
+        serviceCollection.AddSingleton<SearchOriginFilter>();
+        serviceCollection.Configure<MvcOptions>(o => o.Filters.AddService<SearchOriginFilter>());
 
         // Shared remote search endpoint caller: the AI popup controller and the
         // native-search provider (SemanticSearchProvider) both use it.

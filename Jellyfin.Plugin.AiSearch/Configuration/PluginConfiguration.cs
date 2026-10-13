@@ -193,6 +193,23 @@ public class PluginConfiguration : BasePluginConfiguration
     public int SemanticSearchMaxResults { get; set; } = 20;
 
     /// <summary>
+    /// Gets or sets the longest a native search waits for semantic matches, in
+    /// milliseconds (clamped to 250-10000). Jellyfin shows nothing until every
+    /// search provider answers, so this caps what meaning matches can add to a
+    /// search. A slower backend call is not abandoned: it finishes in the
+    /// background and its result is cached for the next keystroke.
+    /// </summary>
+    public int SemanticSearchTimeoutMs { get; set; } = 2000;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether meaning matches are labelled in
+    /// the web client's search results, so they can be told apart from
+    /// Jellyfin's own title matches. Needs the client script, so it keeps the
+    /// script loaded even when <see cref="NativeSearchOnly"/> hides the popup.
+    /// </summary>
+    public bool MarkSemanticMatches { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets a value indicating whether the AI search popup (and its
     /// endpoints) is hidden, leaving only Jellyfin's own search enhanced with
     /// semantic matches.

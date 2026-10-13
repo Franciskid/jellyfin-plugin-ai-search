@@ -1,4 +1,6 @@
 using System;
+using System.Numerics;
+using System.Runtime.InteropServices;
 
 namespace Jellyfin.Plugin.AiSearch.Search;
 
@@ -34,12 +36,38 @@ public static class VectorMath
     /// <param name="left">First vector.</param>
     /// <param name="right">Second vector (same length).</param>
     /// <returns>The dot product.</returns>
-    public static float Dot(float[] left, float[] right)
+    public static float Dot(ReadOnlySpan<float> left, ReadOnlySpan<float> right)
     {
-        // Plain loop on purpose: ~3k movies × 1024 dims is a few milliseconds,
-        // and it saves shipping a SIMD dependency inside the plugin folder.
+        // System.Numerics.Vector<T> is part of the runtime, so this uses the
+        // CPU's SIMD width (AVX2/NEON) without shipping any extra dependency.
+        // Two accumulators hide the add latency; the scalar tail covers
+        // dimensions that are not a multiple of the vector width.
+        var length = Math.Min(left.Length, right.Length);
+        var i = 0;
         float sum = 0;
-        for (var i = 0; i < left.Length; i++)
+        if (Vector.IsHardwareAccelerated && length >= Vector<float>.Count * 2)
+        {
+            var a = MemoryMarshal.Cast<float, Vector<float>>(left[..length]);
+            var b = MemoryMarshal.Cast<float, Vector<float>>(right[..length]);
+            var acc0 = Vector<float>.Zero;
+            var acc1 = Vector<float>.Zero;
+            var k = 0;
+            for (; k + 1 < a.Length; k += 2)
+            {
+                acc0 += a[k] * b[k];
+                acc1 += a[k + 1] * b[k + 1];
+            }
+
+            if (k < a.Length)
+            {
+                acc0 += a[k] * b[k];
+            }
+
+            sum = Vector.Dot(acc0 + acc1, Vector<float>.One);
+            i = a.Length * Vector<float>.Count;
+        }
+
+        for (; i < length; i++)
         {
             sum += left[i] * right[i];
         }

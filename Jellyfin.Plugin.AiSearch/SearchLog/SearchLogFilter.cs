@@ -132,6 +132,10 @@ public sealed class SearchLogFilter : IAsyncActionFilter
                 SkippedReason = trace.SkippedReason,
                 Mode = trace.Mode,
                 DurationMs = trace.DurationMs,
+                BackendMs = trace.BackendMs,
+                ScanMs = trace.ScanMs,
+                LookupMs = trace.LookupMs,
+                Cached = trace.Cached,
                 RawHits = trace.RawHits,
                 Matches = trace.Matches,
                 Error = trace.Error

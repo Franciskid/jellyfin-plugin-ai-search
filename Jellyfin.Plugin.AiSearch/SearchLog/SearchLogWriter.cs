@@ -26,6 +26,10 @@ public sealed class SearchLogWriter : IHostedService
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private static readonly TimeSpan PruneInterval = TimeSpan.FromHours(1);
 
+    // JSON Lines readers expect plain UTF-8; a byte-order mark at the start of
+    // each day's file breaks the first line for most of them.
+    private static readonly UTF8Encoding Utf8NoBom = new(false);
+
     private readonly SearchLogStore _store;
     private readonly string _dir;
     private readonly ILogger<SearchLogWriter> _logger;
@@ -147,7 +151,7 @@ public sealed class SearchLogWriter : IHostedService
         // FileShare.ReadWrite so a concurrent GET /AiSearch/SearchLog read never
         // hits a sharing violation while this append is in flight.
         await using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-        await using var writer = new StreamWriter(stream, Encoding.UTF8);
+        await using var writer = new StreamWriter(stream, Utf8NoBom);
         await writer.WriteLineAsync(json.AsMemory(), cancellationToken).ConfigureAwait(false);
     }
 

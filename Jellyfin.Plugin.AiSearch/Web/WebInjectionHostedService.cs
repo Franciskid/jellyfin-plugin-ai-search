@@ -39,15 +39,15 @@ public class WebInjectionHostedService : IHostedService
     {
         try
         {
-            // Native search only: keep the on-disk copy clean too, so it does not
-            // carry a dead tag left over from before the option was turned on.
-            if (Plugin.Instance!.Configuration.NativeSearchOnly)
+            // Script not needed: keep the on-disk copy clean too, so it does not
+            // carry a dead tag left over from before the options changed.
+            if (IndexHtmlScriptMiddleware.ScriptWanted(Plugin.Instance!.Configuration))
             {
-                Remove();
+                Inject();
             }
             else
             {
-                Inject();
+                Remove();
             }
         }
         catch (Exception ex)

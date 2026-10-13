@@ -79,7 +79,7 @@ internal static class SearchLogEntryBuilder
         for (var i = 0; i < items.Count && list.Count < MaxResults; i++)
         {
             var dto = items[i];
-            (float Similarity, int Rank) hit = default;
+            SemanticHit hit = default;
             var hasHit = trace is not null && trace.Hits.TryGetValue(dto.Id, out hit);
             list.Add(new SearchLogResultEntry
             {
@@ -91,7 +91,8 @@ internal static class SearchLogEntryBuilder
                 SeriesName = dto.SeriesName,
                 SeasonNumber = dto.ParentIndexNumber,
                 EpisodeNumber = dto.IndexNumber,
-                Semantic = hasHit,
+                Semantic = hasHit && !hit.TitleMatch,
+                Origin = !hasHit ? "title" : hit.TitleMatch ? "both" : "semantic",
                 SemanticScore = hasHit ? hit.Similarity : null,
                 SemanticRank = hasHit ? hit.Rank : null
             });
@@ -107,7 +108,7 @@ internal static class SearchLogEntryBuilder
         for (var i = 0; i < hints.Count && list.Count < MaxResults; i++)
         {
             var hint = hints[i];
-            (float Similarity, int Rank) hit = default;
+            SemanticHit hit = default;
             var hasHit = trace is not null && trace.Hits.TryGetValue(hint.Id, out hit);
             list.Add(new SearchLogResultEntry
             {
@@ -119,7 +120,8 @@ internal static class SearchLogEntryBuilder
                 SeriesName = hint.Series,
                 SeasonNumber = hint.ParentIndexNumber,
                 EpisodeNumber = hint.IndexNumber,
-                Semantic = hasHit,
+                Semantic = hasHit && !hit.TitleMatch,
+                Origin = !hasHit ? "title" : hit.TitleMatch ? "both" : "semantic",
                 SemanticScore = hasHit ? hit.Similarity : null,
                 SemanticRank = hasHit ? hit.Rank : null
             });

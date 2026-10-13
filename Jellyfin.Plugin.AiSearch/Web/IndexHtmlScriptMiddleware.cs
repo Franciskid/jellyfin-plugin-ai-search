@@ -12,10 +12,11 @@ namespace Jellyfin.Plugin.AiSearch.Web;
 
 /// <summary>
 /// Adds the plugin's client script tag to the web client's index.html while
-/// Jellyfin serves it, so nothing on disk has to be writable. When
-/// <see cref="Configuration.PluginConfiguration.NativeSearchOnly"/> is on, does
-/// the opposite: strips any AiSearch script tag from the served page instead,
-/// whatever left it there (this middleware, the on-disk injector, or by hand).
+/// Jellyfin serves it, so nothing on disk has to be writable. When the script
+/// has nothing to do (<see cref="Configuration.PluginConfiguration.NativeSearchOnly"/>
+/// hides the popup and meaning matches are not labelled), does the opposite:
+/// strips any AiSearch script tag from the served page instead, whatever left
+/// it there (this middleware, the on-disk injector, or by hand).
 /// </summary>
 public sealed class IndexHtmlScriptMiddleware
 {
@@ -26,7 +27,7 @@ public sealed class IndexHtmlScriptMiddleware
 
     // Matches a bare <script ...AiSearch/ClientScript...></script> tag that was
     // not wrapped in the begin/end markers above (hand-added, or an older
-    // version's format), so it can be stripped too under NativeSearchOnly.
+    // version's format), so it can be stripped too when the script is unwanted.
     private static readonly Regex BareScriptTag = new(
         "<script\\b[^>]*\\bsrc\\s*=\\s*[\"'][^\"']*AiSearch/ClientScript[^\"']*[\"'][^>]*>\\s*</script>",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -81,9 +82,9 @@ public sealed class IndexHtmlScriptMiddleware
         {
             // Read live: the option can be flipped without a restart, so every
             // request re-checks it rather than trusting a cached decision.
-            bytes = Plugin.Instance!.Configuration.NativeSearchOnly
-                ? StripScriptTag(context, bytes)
-                : AddScriptTag(context, bytes);
+            bytes = ScriptWanted(Plugin.Instance!.Configuration)
+                ? AddScriptTag(context, bytes)
+                : StripScriptTag(context, bytes);
         }
 
         if (bytes.Length == 0)
@@ -93,6 +94,15 @@ public sealed class IndexHtmlScriptMiddleware
 
         await originalBody.WriteAsync(bytes, context.RequestAborted).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Whether the web client needs the script: for the popup, or, with the
+    /// popup hidden, to label meaning matches in Jellyfin's own search.
+    /// </summary>
+    /// <param name="config">The current plugin configuration.</param>
+    /// <returns><c>true</c> when the script tag belongs in index.html.</returns>
+    internal static bool ScriptWanted(Configuration.PluginConfiguration config) =>
+        !config.NativeSearchOnly || (config.SemanticSearchEnabled && config.MarkSemanticMatches);
 
     private static bool IsIndexHtmlRequest(string? path)
     {
@@ -173,7 +183,7 @@ public sealed class IndexHtmlScriptMiddleware
 
             if (Interlocked.Exchange(ref _logged, 1) == 0)
             {
-                _logger.LogInformation("AiSearch: native search only is on; removing the client script from index.html as it is served.");
+                _logger.LogInformation("AiSearch: the client script is not needed; removing it from index.html as it is served.");
             }
 
             return updated;

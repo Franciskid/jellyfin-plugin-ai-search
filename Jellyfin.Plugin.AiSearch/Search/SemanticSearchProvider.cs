@@ -27,8 +27,11 @@ namespace Jellyfin.Plugin.AiSearch.Search;
 public sealed class SemanticSearchProvider : IInternalSearchProvider
 {
     private static readonly BaseItemKind[] SupportedKinds = { BaseItemKind.Movie, BaseItemKind.Series, BaseItemKind.Episode };
-    private static readonly TimeSpan RetrievalTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan WarnInterval = TimeSpan.FromMinutes(1);
+
+    // Remote answers depend on the user and the text only; two minutes covers
+    // retyping, backspacing and the web client's duplicate requests.
+    private static readonly CoalescingCache<List<(Guid ItemId, float Score)>> RemoteCache = new(256, TimeSpan.FromMinutes(2));
 
     private readonly SemanticRetriever _retriever;
     private readonly RemoteSearchClient _remoteSearchClient;
@@ -36,6 +39,7 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
     private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly SemanticWarmer _warmer;
     private readonly ILogger<SemanticSearchProvider> _logger;
 
     private static long _lastWarnTicks;
@@ -47,6 +51,7 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
     /// <param name="libraryManager">Library manager, for loading and visibility-checking candidate items.</param>
     /// <param name="userManager">User manager, for resolving the calling user.</param>
     /// <param name="httpContextAccessor">Gives access to the current request, to store the per-request trace.</param>
+    /// <param name="warmer">Keeps the retrieval backend loaded between searches.</param>
     /// <param name="logger">Logger.</param>
     public SemanticSearchProvider(
         SemanticRetriever retriever,
@@ -55,6 +60,7 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
         ILibraryManager libraryManager,
         IUserManager userManager,
         IHttpContextAccessor httpContextAccessor,
+        SemanticWarmer warmer,
         ILogger<SemanticSearchProvider> logger)
     {
         _retriever = retriever;
@@ -63,6 +69,7 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
         _libraryManager = libraryManager;
         _userManager = userManager;
         _httpContextAccessor = httpContextAccessor;
+        _warmer = warmer;
         _logger = logger;
     }
 
@@ -129,6 +136,9 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
             var wordCount = query.SearchTerm.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
             if (wordCount < Math.Max(1, config.SemanticSearchMinWords))
             {
+                // The sentence is still being typed: load a cold model now so
+                // it is ready by the time the query is long enough to run.
+                _warmer.Touch(config);
                 RecordSkip(trace, "too_short", enabled: true);
                 return false;
             }
@@ -156,25 +166,49 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
         var kinds = AllowedKinds(query);
         var take = Math.Clamp(config.SemanticSearchMaxResults, 1, 100);
         var overfetch = take * 4;
+        var isRemote = string.Equals(config.RetrievalMode, "remote", StringComparison.OrdinalIgnoreCase);
+        if (trace is not null)
+        {
+            trace.Mode = isRemote ? "remote" : "local";
+        }
 
+        // Jellyfin answers a search only once every provider has, so this
+        // budget is the most meaning matches may ever add to a search. The
+        // backend call itself is not cut short (see CoalescingCache).
+        var budget = TimeSpan.FromMilliseconds(Math.Clamp(config.SemanticSearchTimeoutMs, 250, 10000));
         var stopwatch = Stopwatch.StartNew();
-        using var timeoutSource = new CancellationTokenSource(RetrievalTimeout);
+        using var timeoutSource = new CancellationTokenSource(budget);
         using var linkedSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
 
         try
         {
             // Guid.Empty is never a resolvable user; GetUserById throws on it.
             var user = query.UserId is Guid uid && uid != Guid.Empty ? _userManager.GetUserById(uid) : null;
-            var isRemote = string.Equals(config.RetrievalMode, "remote", StringComparison.OrdinalIgnoreCase);
 
-            IReadOnlyList<(Guid ItemId, float Score)>? ranked = isRemote
-                ? await RemoteRetrieveAsync(config, query.SearchTerm, kinds, overfetch, user?.Id, user?.Username, linkedSource.Token).ConfigureAwait(false)
-                : await _retriever.TryRetrieveScoredAsync(config, query.SearchTerm, overfetch, null, linkedSource.Token, throwOnError: true).ConfigureAwait(false);
-
-            if (trace is not null)
+            IReadOnlyList<(Guid ItemId, float Score)>? ranked;
+            if (isRemote)
             {
-                trace.Mode = isRemote ? "remote" : "local";
+                var remote = await RemoteRetrieveAsync(config, query.SearchTerm, kinds, overfetch, user?.Id, user?.Username, linkedSource.Token).ConfigureAwait(false);
+                ranked = remote?.Hits;
+                if (trace is not null && remote is not null)
+                {
+                    trace.BackendMs = remote.Cached ? 0 : stopwatch.ElapsedMilliseconds;
+                    trace.Cached = remote.Cached;
+                }
             }
+            else
+            {
+                var local = await _retriever.RetrieveAsync(config, query.SearchTerm, overfetch, null, linkedSource.Token).ConfigureAwait(false);
+                ranked = local?.Hits;
+                if (trace is not null && local is not null)
+                {
+                    trace.BackendMs = local.EmbedMs;
+                    trace.ScanMs = local.ScanMs;
+                    trace.Cached = local.CachedQuery;
+                }
+            }
+
+            _warmer.MarkUsed();
 
             if (ranked is null || ranked.Count == 0)
             {
@@ -182,11 +216,7 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
                 return Array.Empty<SearchResult>();
             }
 
-            if (trace is not null)
-            {
-                trace.RawHits = ranked.Count;
-            }
-
+            var lookupStarted = stopwatch.ElapsedMilliseconds;
             var candidateIds = ranked.Select(h => h.ItemId).ToArray();
             var items = _libraryManager.GetItemList(new InternalItemsQuery(user)
             {
@@ -205,7 +235,7 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
             }
 
             var resultIds = new HashSet<Guid>(byId.Keys);
-            var filtered = new List<(Guid ItemId, float Score)>(Math.Min(ranked.Count, take));
+            var filtered = new List<(Guid ItemId, float Score, bool TitleMatch)>(Math.Min(ranked.Count, take));
             foreach (var (id, score) in ranked)
             {
                 if (!byId.TryGetValue(id, out var item))
@@ -225,18 +255,23 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
                     continue;
                 }
 
-                filtered.Add((id, score));
+                filtered.Add((id, score, TitleMatcher.IsTitleMatch(item, query.SearchTerm)));
                 if (filtered.Count >= take)
                 {
                     break;
                 }
             }
 
+            if (trace is not null)
+            {
+                trace.LookupMs = stopwatch.ElapsedMilliseconds - lookupStarted;
+            }
+
             var count = filtered.Count;
             var output = new List<SearchResult>(count);
             for (var rank = 0; rank < count; rank++)
             {
-                var (id, similarity) = filtered[rank];
+                var (id, similarity, titleMatch) = filtered[rank];
 
                 // Kept strictly below 50 (SqlSearchProvider's lowest tier, "contains")
                 // so semantic hits never outrank a title match.
@@ -244,7 +279,7 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
                 output.Add(new SearchResult(id, mappedScore));
                 if (trace is not null)
                 {
-                    trace.Hits[id] = (similarity, rank + 1);
+                    trace.Hits[id] = new SemanticHit(similarity, rank + 1, titleMatch);
                 }
             }
 
@@ -253,12 +288,18 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            var isTimeout = ex is OperationCanceledException;
-            var reason = isTimeout ? "timeout" : ex.Message;
-            WarnRateLimited(reason);
+            var isTimeout = ex is OperationCanceledException or TimeoutException;
+            var reason = isTimeout
+                ? $"timeout after {(long)budget.TotalMilliseconds} ms (the backend call continues in the background)"
+                : ex.Message;
+            if (!isTimeout)
+            {
+                WarnRateLimited(reason);
+            }
+
             if (trace is not null)
             {
-                trace.Error = reason;
+                trace.Error = isTimeout ? "timeout" : reason;
                 trace.DurationMs = stopwatch.ElapsedMilliseconds;
             }
 
@@ -297,7 +338,7 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
         return kinds;
     }
 
-    private async Task<List<(Guid ItemId, float Score)>?> RemoteRetrieveAsync(
+    private async Task<RemoteRetrieval?> RemoteRetrieveAsync(
         PluginConfiguration config,
         string term,
         HashSet<BaseItemKind> kinds,
@@ -323,16 +364,14 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
         }
 
         var perScope = await Task.WhenAll(
-            scopes.Select(scope => RemoteScopeAsync(config, term, scope, take, userId, userName, cancellationToken)))
+            scopes.Select(scope => RemoteScopeAsync(config, term.Trim(), scope, take, userId, userName, cancellationToken)))
             .ConfigureAwait(false);
 
         if (perScope.All(r => r.Results is null))
         {
-            // Every scope failed (or none are configured to return anything):
-            // throw so the caller's single catch block records the error in the
-            // trace and rate-limits its own warning, the same path a local-index
-            // failure takes. A genuine cancellation already propagated out of
-            // Task.WhenAll above rather than reaching here.
+            // Every scope failed: throw so the caller's single catch block
+            // records the error in the trace and rate-limits its own warning,
+            // the same path a local-index failure takes.
             throw new InvalidOperationException(
                 perScope.Select(r => r.Error).FirstOrDefault(e => e is not null) ?? "remote search returned no results.");
         }
@@ -362,13 +401,14 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
             }
         }
 
-        return order
+        var merged = order
             .Select(id => (ItemId: id, Score: best[id]))
             .OrderByDescending(h => h.Score)
             .ToList();
+        return new RemoteRetrieval(merged, perScope.All(r => r.Cached));
     }
 
-    private Task<RemoteSearchResponse> RemoteScopeAsync(
+    private async Task<(List<(Guid ItemId, float Score)>? Results, string? Error, bool Cached)> RemoteScopeAsync(
         PluginConfiguration config,
         string term,
         string scope,
@@ -377,18 +417,44 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
         string? userName,
         CancellationToken cancellationToken)
     {
-        var payload = new
+        var payload = new Dictionary<string, object>
         {
-            query = term,
-            scope,
-            maxResults = take,
-            includeWatched = true,
-            excludeItemIds = Array.Empty<string>(),
-            user = userId is Guid uid ? new { id = uid.ToString("N"), name = userName ?? string.Empty } : null,
-            client = new { name = "jellyfin-ai-search", version = ClientVersion }
+            ["query"] = term,
+            ["scope"] = scope,
+            ["maxResults"] = take,
+            ["includeWatched"] = true,
+            ["excludeItemIds"] = Array.Empty<string>(),
+            ["client"] = new { name = "jellyfin-ai-search", version = ClientVersion }
         };
 
-        return _remoteSearchClient.SearchAsync(config.SearchEndpointUrl, config.SearchApiKey, config.TimeoutSeconds, payload, cancellationToken);
+        // The endpoint expects an object or nothing: a search made with an API
+        // key has no user, and sending "user": null gets the call rejected.
+        if (userId is Guid uid)
+        {
+            payload["user"] = new { id = uid.ToString("N"), name = userName ?? string.Empty };
+        }
+
+        var key = string.Join('\n', config.SearchEndpointUrl, scope, take.ToString(System.Globalization.CultureInfo.InvariantCulture), userId?.ToString("N") ?? "-", term);
+        var timeout = TimeSpan.FromSeconds(Math.Clamp(config.TimeoutSeconds, 5, 120));
+        try
+        {
+            var (results, cached) = await RemoteCache.GetAsync(
+                key,
+                async token =>
+                {
+                    var response = await _remoteSearchClient
+                        .SearchAsync(config.SearchEndpointUrl, config.SearchApiKey, config.TimeoutSeconds, payload, token)
+                        .ConfigureAwait(false);
+                    return response.Results ?? throw new InvalidOperationException(response.Error ?? "remote search failed.");
+                },
+                timeout,
+                cancellationToken).ConfigureAwait(false);
+            return (results, null, cached);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return (null, ex.Message, false);
+        }
     }
 
     private SemanticSearchTrace? GetOrCreateTrace()
@@ -432,6 +498,8 @@ public sealed class SemanticSearchProvider : IInternalSearchProvider
         trace.Matches = matches;
         trace.DurationMs = stopwatch.ElapsedMilliseconds;
     }
+
+    private sealed record RemoteRetrieval(List<(Guid ItemId, float Score)> Hits, bool Cached);
 
     private void WarnRateLimited(string reason)
     {

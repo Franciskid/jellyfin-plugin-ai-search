@@ -59,7 +59,10 @@
             q2opts: [['short', 'Under 90 min'], ['normal', 'Around 2 hours'], ['any', "Doesn't matter"]],
             q3: 'Seen it already?',
             q3opts: [['unseen', 'Something new'], ['rewatch', 'Can rewatch a favorite']],
-            go: 'Find it'
+            go: 'Find it',
+            originBadge: 'AI',
+            originTitle: 'Found by AI Search from the meaning of your search, not by its title',
+            originLegend: 'found by AI Search from the meaning of your search. Everything else comes from Jellyfin\'s title search.'
         },
         fr: {
             fabTitle: 'Recherche IA',
@@ -104,7 +107,10 @@
             q2opts: [['short', 'Moins de 90 min'], ['normal', 'Environ 2 h'], ['any', 'Peu importe']],
             q3: 'Déjà vu ?',
             q3opts: [['unseen', 'Du nouveau'], ['rewatch', 'Un favori à revoir']],
-            go: 'Trouver'
+            go: 'Trouver',
+            originBadge: 'IA',
+            originTitle: 'Trouvé par la recherche IA à partir du sens de votre recherche, pas par son titre',
+            originLegend: 'trouvé par la recherche IA à partir du sens de votre recherche. Le reste vient de la recherche par titre de Jellyfin.'
         }
     };
 
@@ -398,6 +404,15 @@
     '@keyframes ais-expand{from{transform:scaleX(.72)}to{transform:scaleX(1)}}' +
     '@keyframes ais-spin{to{transform:rotate(360deg)}}' +
     '@media (max-width:640px){.ais-helptxt{display:none}.ais-help{padding:0 9px}}' +
+
+    // Labels on meaning matches inside Jellyfin's own search results.
+    '.ais-origin{position:absolute;top:6px;left:6px;z-index:3;display:inline-flex;align-items:center;gap:3px;' +
+      'padding:2px 6px 2px 4px;font-size:11px;font-weight:700;letter-spacing:.03em;line-height:16px;color:#fff;' +
+      'background:' + ACCENT + ';box-shadow:0 1px 4px rgba(0,0,0,.55);pointer-events:auto;cursor:help}' +
+    '.ais-origin .ais-ic{width:12px;height:12px}' +
+    '.card.ais-ai-match .cardScalable,.card.ais-ai-match .cardImageContainer{outline:2px solid ' + ACCENT + ';outline-offset:-2px}' +
+    '.ais-legend{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 4px;padding:0 3.3%;font-size:13px;color:#aeb4bd}' +
+    '.ais-legend .ais-origin{position:static;box-shadow:none;cursor:default}' +
     '@media (prefers-reduced-motion:reduce){.ais-panel,.ais-inputwrap{animation:none!important}.ais-spin{animation-duration:1.2s}}';
 
     function injectStyles() {
@@ -481,6 +496,7 @@
 
     function openPanel() {
         if (overlay) { return; }
+        warmUp();
         prevHtmlOverflow = document.documentElement.style.overflow;
         document.documentElement.style.overflow = 'hidden';
         var s = t();
@@ -966,23 +982,203 @@
         fab = null;
     }
 
+    var popupEnabled = true;
+
     function updateLauncher() {
-        if (usable && !isPlaying()) { ensureFab(); }
-        else { removeFab(); if (!usable) { closePanel(); } }
+        if (usable && popupEnabled && !isPlaying()) { ensureFab(); }
+        else { removeFab(); if (!usable || !popupEnabled) { closePanel(); } }
     }
 
     function refreshHealth() {
         var a = api();
         if (!a || typeof a.ajax !== 'function' || typeof a.getUrl !== 'function') { return; }
         a.ajax({ type: 'GET', url: a.getUrl('AiSearch/Health'), dataType: 'json' })
-            .then(function (h) { usable = !!(h && h.enabled && h.configured); updateLauncher(); })
+            .then(function (h) {
+                usable = !!(h && h.enabled && h.configured);
+                popupEnabled = !h || h.popup !== false;
+                origin.enabled = !!(h && h.markMatches);
+                updateLauncher();
+                origin.schedule();
+            })
             .catch(function () { /* keep last known state */ });
+    }
+
+    // ------------------------------------------------------------- warm-up ---
+
+    // Embedding servers unload idle models; reloading one takes seconds. Ask
+    // the server to load it as soon as the user opens a search, so the model
+    // is ready by the time they have typed something. The server ignores the
+    // call when the backend was used recently.
+    var lastWarm = 0;
+    function warmUp() {
+        var a = api();
+        if (!a || typeof a.ajax !== 'function' || Date.now() - lastWarm < 60000) { return; }
+        lastWarm = Date.now();
+        a.ajax({ type: 'POST', url: a.getUrl('AiSearch/Warmup'), dataType: 'json' }).catch(function () { });
+    }
+
+    function isSearchPage() {
+        return /^#!?\/search(\?|$)/i.test(window.location.hash || '');
+    }
+
+    // ------------------------------------------------- native search labels ---
+
+    // Jellyfin's search results mix title matches with the plugin's meaning
+    // matches. The server lists the ids only the meaning match found in an
+    // X-AiSearch-Matches response header; this records them per search term
+    // and labels those cards, so the user can tell where each result came from.
+    var origin = (function () {
+        var byTerm = {};
+        var pending = false;
+        var state = { enabled: false };
+
+        function normTerm(term) { return String(term || '').trim().toLowerCase(); }
+        function normId(id) { return String(id || '').replace(/-/g, '').toLowerCase(); }
+
+        function searchTermOf(url) {
+            if (!url || !/searchterm=/i.test(url) || !/\/(items|search\/hints)(\?|$)/i.test(url.split('#')[0].replace(/\?.*$/, '') + '?')) { return null; }
+            var m = /[?&]searchTerm=([^&#]*)/i.exec(url);
+            if (!m) { return null; }
+            try { return decodeURIComponent(m[1].replace(/\+/g, ' ')); } catch (e) { return m[1]; }
+        }
+
+        function capture(url, header) {
+            if (header === null || header === undefined) { return; }
+            var term = searchTermOf(url);
+            if (term === null) { return; }
+            var key = normTerm(term);
+            var set = byTerm[key] || (byTerm[key] = {});
+            String(header).split(',').forEach(function (id) { id = normId(id); if (id) { set[id] = true; } });
+            schedule();
+        }
+
+        function currentTerm() {
+            var hash = window.location.hash || '';
+            var q = hash.indexOf('?') >= 0 ? hash.slice(hash.indexOf('?') + 1) : '';
+            var m = /(?:^|&)query=([^&]*)/.exec(q);
+            if (!m) { return null; }
+            try { return normTerm(decodeURIComponent(m[1].replace(/\+/g, ' '))); } catch (e) { return normTerm(m[1]); }
+        }
+
+        function badgeHtml() {
+            return IC.sparkle + esc(t().originBadge);
+        }
+
+        function apply() {
+            pending = false;
+            var page = document.getElementById('searchPage');
+            var active = state.enabled && isSearchPage() && page;
+            var set = active ? byTerm[currentTerm() || ''] : null;
+            var scope = page || document;
+            var cards = scope.querySelectorAll('.searchResults .card[data-id], .card.ais-ai-match');
+            var marked = 0;
+            for (var i = 0; i < cards.length; i++) {
+                var card = cards[i];
+                var isAi = !!(set && set[normId(card.getAttribute('data-id'))]);
+                var badge = card.querySelector('.ais-origin');
+                if (isAi) {
+                    marked++;
+                    card.classList.add('ais-ai-match');
+                    if (!badge) {
+                        var host = card.querySelector('.cardScalable') || card.querySelector('.cardBox') || card;
+                        if (getComputedStyle(host).position === 'static') { host.style.position = 'relative'; }
+                        badge = document.createElement('span');
+                        badge.className = 'ais-origin';
+                        badge.title = t().originTitle;
+                        badge.innerHTML = badgeHtml();
+                        host.appendChild(badge);
+                    }
+                } else {
+                    card.classList.remove('ais-ai-match');
+                    if (badge && badge.parentNode) { badge.parentNode.removeChild(badge); }
+                }
+            }
+
+            var results = page && page.querySelector('.searchResults');
+            var legend = page && page.querySelector('.ais-legend');
+            if (results && marked > 0) {
+                if (!legend || legend.parentNode !== results) {
+                    if (legend && legend.parentNode) { legend.parentNode.removeChild(legend); }
+                    legend = document.createElement('div');
+                    legend.className = 'ais-legend';
+                    legend.innerHTML = '<span class="ais-origin">' + badgeHtml() + '</span><span>' + esc(t().originLegend) + '</span>';
+                    results.insertBefore(legend, results.firstChild);
+                }
+            } else if (legend && legend.parentNode) {
+                legend.parentNode.removeChild(legend);
+            }
+        }
+
+        function schedule() {
+            if (pending) { return; }
+            pending = true;
+            (window.requestAnimationFrame || setTimeout)(apply);
+        }
+
+        function hookXhr() {
+            var proto = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+            if (!proto || proto.__aisHooked) { return; }
+            proto.__aisHooked = true;
+            var open = proto.open;
+            var send = proto.send;
+            proto.open = function (method, url) {
+                this.__aisUrl = typeof url === 'string' ? url : String(url || '');
+                return open.apply(this, arguments);
+            };
+            proto.send = function () {
+                var xhr = this;
+                if (searchTermOf(xhr.__aisUrl) !== null) {
+                    xhr.addEventListener('load', function () {
+                        try { capture(xhr.__aisUrl, xhr.getResponseHeader('X-AiSearch-Matches')); } catch (e) { /* ignore */ }
+                    });
+                }
+                return send.apply(this, arguments);
+            };
+        }
+
+        function hookFetch() {
+            if (typeof window.fetch !== 'function' || window.fetch.__aisHooked) { return; }
+            var original = window.fetch;
+            var wrapped = function (input) {
+                var url = typeof input === 'string' ? input : (input && input.url) || '';
+                var promise = original.apply(this, arguments);
+                if (searchTermOf(url) !== null) {
+                    promise.then(function (r) {
+                        try { capture(url, r.headers.get('X-AiSearch-Matches')); } catch (e) { /* ignore */ }
+                    }, function () { });
+                }
+                return promise;
+            };
+            wrapped.__aisHooked = true;
+            window.fetch = wrapped;
+        }
+
+        function start() {
+            hookXhr();
+            hookFetch();
+            new MutationObserver(function () { if (state.enabled && isSearchPage()) { schedule(); } })
+                .observe(document.body, { childList: true, subtree: true });
+            window.addEventListener('hashchange', schedule);
+        }
+
+        state.start = start;
+        state.schedule = schedule;
+        return state;
+    }());
+
+    // Hook requests right away: the web client may search before it is ready.
+    origin.start();
+
+    function onRoute() {
+        updateLauncher();
+        if (isSearchPage()) { warmUp(); }
     }
 
     ready(function () {
         injectStyles();
         refreshHealth();
-        window.addEventListener('hashchange', updateLauncher);
+        onRoute();
+        window.addEventListener('hashchange', onRoute);
         setInterval(updateLauncher, 1500);
         setInterval(refreshHealth, 15000);
     });

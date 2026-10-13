@@ -92,7 +92,9 @@ current index.
 | | |
 |---|---|
 | Index size | about 100 MB, one file |
-| Query time | milliseconds in memory. Most of the wait is for the embedding service |
+| Index scan | about 2 ms for 15000 entries × 768 dims (SIMD, one contiguous matrix) |
+| Jellyfin search with meaning matches | about 80-150 ms warm; a repeated or retyped search about 10-20 ms of that |
+| AI popup without the model | about 0.1-0.3 s (the model call, when on, comes on top) |
 | First build, Ollama + bge-m3 on CPU | about 40 minutes |
 | First build, OpenAI `text-embedding-3-small` | a few minutes, about $0.05 |
 | Nightly incremental build | about 1 minute, usually 0 re-embeds |
@@ -146,9 +148,31 @@ Scoping and access control:
   standard visibility and parental-control rule (`BaseItem.IsVisibleStandalone`) before returning
   it. An API-key call with no user context skips that per-user check, same as Jellyfin's own
   providers do.
-- A 5-second internal timeout protects ordinary Jellyfin search from ever waiting on a slow
-  embeddings or search backend; on timeout or any other failure, this plugin simply contributes no
-  matches for that search (title search is unaffected).
+- Jellyfin only answers a search once every provider has, so the plugin caps its own wait
+  ("Longest wait for meaning-based matches", 2 seconds by default). A slower backend call is not
+  dropped: it finishes in the background and its answer is cached, so the next keystroke gets it
+  instantly. On a timeout or any failure this plugin contributes no matches for that search; title
+  search is unaffected.
+
+Speed:
+
+- Query vectors (local index) and remote answers are cached and shared: identical searches running
+  at the same time, a retyped term, or "show more" cost one backend call.
+- Embedding servers such as Ollama unload an idle model after a few minutes, and reloading it used
+  to land on the first search of a session. The web client now asks the server to warm the backend
+  up when the search page or the AI popup opens (`POST /AiSearch/Warmup`), so the model loads while
+  you type. It does nothing if the backend was used in the last three minutes.
+
+Telling title matches and meaning matches apart:
+
+- Results that only this plugin found get an **AI** tag on their poster in the web client's search
+  page, with a one-line legend above the results. Anything without the tag came from Jellyfin's own
+  title search (an item both searches found counts as a title match).
+- The plugin tells the client which results those are with an `X-AiSearch-Matches` response header
+  on `/Items` and `/Search/Hints` (comma-separated item ids); the response body is left untouched,
+  so other clients are not affected. A `Server-Timing: aisearch;dur=...` entry shows how long the
+  plugin took, in the browser's network tab.
+- The search log records the same thing per result as `origin`: `title`, `semantic` or `both`.
 
 Options (**Dashboard → Plugins → AI Search**, "4. Jellyfin search"):
 
@@ -158,6 +182,8 @@ Options (**Dashboard → Plugins → AI Search**, "4. Jellyfin search"):
 | Only for searches that look like a sentence | Off | Skips short keyword-style searches (see the minimum word count below), where meaning-based matches tend to be noisy. |
 | Minimum words to run | 3 | Used only when the option above is on. |
 | Max meaning-based matches per search | 20 | Upper bound on how many of this plugin's matches are added to one search. |
+| Longest wait for meaning-based matches (ms) | 2000 | 250-10000. Caps how long a search can wait on the backend; a slower call finishes in the background for the next search. |
+| Label meaning-based matches in search results | On | Adds the **AI** tag described above. |
 | Native search only | Off | See below. |
 
 ### Native search only
@@ -165,13 +191,14 @@ Options (**Dashboard → Plugins → AI Search**, "4. Jellyfin search"):
 Turning this on hides the AI search bar and popup entirely, leaving Jellyfin's own search (now
 with meaning-based matches, if enabled above) as the only search experience.
 
-- The web client's `index.html` is served without the popup's `<script>` tag; a copy already
-  present (from before the option was turned on, or added by hand) is stripped as the page is
-  served, and the on-disk injected copy is removed at startup too.
-- These endpoints, which only ever serve the popup, are refused with a bare 404: `ClientScript`,
-  `Health`, `Models`, `Recommend`, `Interview`, `History` (GET and DELETE), `Playlist`.
+- The client script stays loaded only to tag meaning matches (when that option is on); it shows no
+  button or popup. With labels off too, `index.html` is served without the script tag, a copy
+  already present is stripped as the page is served, and the on-disk injected copy is removed at
+  startup.
+- These endpoints, which only ever serve the popup, are refused with a bare 404: `Models`,
+  `Recommend`, `Interview`, `History` (GET and DELETE), `Playlist`.
 - These stay reachable regardless of this option, since they serve the dashboard or native search:
-  `EmbeddingModels`, `IndexStatus`, `RebuildIndex`, `SearchLog`.
+  `ClientScript`, `Health`, `Warmup`, `EmbeddingModels`, `IndexStatus`, `RebuildIndex`, `SearchLog`.
 
 ## Search log
 
@@ -189,9 +216,10 @@ external collector or another admin tool to read.
   version/device, remote address and User-Agent, every other query parameter (with anything that
   looks like a credential - API key, token, auth, password - left out), the `parentId` scope if
   any, result counts, and up to 250 result rows (item id, name, type, year, series/season/episode,
-  whether it was a semantic match with its similarity and rank, and, for AI popup entries, the
-  model's one-line reason). AI popup entries also carry the mode (`normal`/`surprise`) and the
-  model's answer text.
+  its `origin` (`title`, `semantic` or `both`) with the semantic similarity and rank, and, for AI
+  popup entries, the model's one-line reason). Native search entries also carry the plugin's
+  timing split (`backendMs`, `scanMs`, `lookupMs`, `cached`). AI popup entries also carry the mode
+  (`normal`/`surprise`) and the model's answer text. Files are plain UTF-8 without a byte-order mark.
 
 **`GET /AiSearch/SearchLog`** (admin only) reads it back:
 
@@ -338,6 +366,8 @@ when you need to cap usage per user centrally. The contract is at the bottom of 
 | Only for searches that look like a sentence | Off | Skips short keyword-style searches. |
 | Minimum words to run | 3 | Only checked when the option above is on. |
 | Max meaning-based matches per search | 20 | Upper bound per search. |
+| Longest wait for meaning-based matches (ms) | 2000 | How long a search may wait on the backend. |
+| Label meaning-based matches in search results | On | Tags results only the meaning search found. |
 | Native search only | Off | Hides the AI search bar/popup and its endpoints. |
 
 **Search log** (see [Search log](#search-log) above)
@@ -356,8 +386,9 @@ when you need to cap usage per user centrally. The contract is at the bottom of 
 | `GET /AiSearch/History` | Session | The caller's recent searches | Refused (404) |
 | `DELETE /AiSearch/History[/{id}]` | Session | Delete one search, or clear all | Refused (404) |
 | `POST /AiSearch/Playlist` | Session | Save a result set as a playlist | Refused (404) |
-| `GET /AiSearch/Health` | Session | Enabled and configured state, for the client script | Refused (404) |
-| `GET /AiSearch/ClientScript` | none | The injected UI script. Contains no secrets. | Refused (404) |
+| `GET /AiSearch/Health` | Session | Enabled, configured, popup and label state, for the client script | Reachable |
+| `POST /AiSearch/Warmup` | Session | Load a cold retrieval backend before the user's query | Reachable |
+| `GET /AiSearch/ClientScript` | none | The injected UI script. Contains no secrets. | Reachable |
 | `GET /AiSearch/Models` | Admin | Chat models, proxied from the models endpoint | Refused (404) |
 | `GET /AiSearch/EmbeddingModels` | Admin | Embedding models, for the config dropdown | Reachable |
 | `GET /AiSearch/IndexStatus` | Admin | Index size, model, last build, last error | Reachable |

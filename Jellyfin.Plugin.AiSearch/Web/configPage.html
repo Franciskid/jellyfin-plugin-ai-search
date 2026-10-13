@@ -223,6 +223,21 @@
                 <div class="inputContainer">
                     <input is="emby-input" type="number" id="SemanticSearchMaxResults" label="Max meaning-based matches per search" min="1" max="100" />
                 </div>
+                <div class="inputContainer">
+                    <input is="emby-input" type="number" id="SemanticSearchTimeoutMs" label="Longest wait for meaning-based matches (ms)" min="250" max="10000" step="250" />
+                    <div class="fieldDescription">
+                        Jellyfin shows search results only once every source has answered, so this caps how much a slow
+                        embedding or search backend can delay a search. A slower call still finishes in the background and
+                        is reused by the next search.
+                    </div>
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="MarkSemanticMatches" />
+                        <span>Label meaning-based matches in search results</span>
+                    </label>
+                    <div class="fieldDescription">Adds an "AI" tag to results that only the meaning-based search found, so they can be told apart from title matches.</div>
+                </div>
                 <div class="checkboxContainer checkboxContainer-withDescription">
                     <label>
                         <input is="emby-checkbox" type="checkbox" id="NativeSearchOnly" />
@@ -230,7 +245,7 @@
                     </label>
                     <div class="fieldDescription">
                         Hides the AI search bar and its popup entirely, and turns off its endpoints. Jellyfin's own
-                        search still gets meaning-based matches from the option above.
+                        search still gets meaning-based matches from the option above (and their labels, if on).
                     </div>
                 </div>
 
@@ -359,6 +374,8 @@
                     page.querySelector('#SemanticSearchSentencesOnly').checked = cfg.SemanticSearchSentencesOnly === true;
                     page.querySelector('#SemanticSearchMinWords').value = cfg.SemanticSearchMinWords;
                     page.querySelector('#SemanticSearchMaxResults').value = cfg.SemanticSearchMaxResults;
+                    page.querySelector('#SemanticSearchTimeoutMs').value = cfg.SemanticSearchTimeoutMs || 2000;
+                    page.querySelector('#MarkSemanticMatches').checked = cfg.MarkSemanticMatches !== false;
                     page.querySelector('#NativeSearchOnly').checked = cfg.NativeSearchOnly === true;
                     page.querySelector('#LogSearches').checked = cfg.LogSearches === true;
                     page.querySelector('#SearchLogRetentionDays').value = cfg.SearchLogRetentionDays;
@@ -434,6 +451,8 @@
                     cfg.SemanticSearchSentencesOnly = page.querySelector('#SemanticSearchSentencesOnly').checked;
                     cfg.SemanticSearchMinWords = parseInt(page.querySelector('#SemanticSearchMinWords').value, 10) || 3;
                     cfg.SemanticSearchMaxResults = parseInt(page.querySelector('#SemanticSearchMaxResults').value, 10) || 20;
+                    cfg.SemanticSearchTimeoutMs = parseInt(page.querySelector('#SemanticSearchTimeoutMs').value, 10) || 2000;
+                    cfg.MarkSemanticMatches = page.querySelector('#MarkSemanticMatches').checked;
                     cfg.NativeSearchOnly = page.querySelector('#NativeSearchOnly').checked;
                     cfg.LogSearches = page.querySelector('#LogSearches').checked;
                     cfg.SearchLogRetentionDays = parseInt(page.querySelector('#SearchLogRetentionDays').value, 10) || 7;

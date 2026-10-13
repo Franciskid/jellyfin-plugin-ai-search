@@ -10,11 +10,13 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
+using Jellyfin.Database.Implementations.Enums;
 using Jellyfin.Plugin.AiSearch.Configuration;
 using Jellyfin.Plugin.AiSearch.History;
 using Jellyfin.Plugin.AiSearch.Recommend;
 using Jellyfin.Plugin.AiSearch.Search;
 using Jellyfin.Plugin.AiSearch.SearchLog;
+using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
@@ -94,6 +96,7 @@ public class AiSearchController : ControllerBase
     private readonly IUserDataManager _userDataManager;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly SemanticRetriever _semanticRetriever;
+    private readonly SemanticWarmer _warmer;
     private readonly RemoteSearchClient _remoteSearchClient;
     private readonly DirectChatClient _directChat;
     private readonly IPlaylistManager _playlistManager;
@@ -109,6 +112,7 @@ public class AiSearchController : ControllerBase
         IUserDataManager userDataManager,
         IHttpClientFactory httpClientFactory,
         SemanticRetriever semanticRetriever,
+        SemanticWarmer warmer,
         RemoteSearchClient remoteSearchClient,
         DirectChatClient directChat,
         IPlaylistManager playlistManager,
@@ -122,6 +126,7 @@ public class AiSearchController : ControllerBase
         _userDataManager = userDataManager;
         _httpClientFactory = httpClientFactory;
         _semanticRetriever = semanticRetriever;
+        _warmer = warmer;
         _remoteSearchClient = remoteSearchClient;
         _directChat = directChat;
         _playlistManager = playlistManager;
@@ -156,7 +161,6 @@ public class AiSearchController : ControllerBase
     /// <summary>Serves the injected web-client script (no auth; contains no secrets).</summary>
     [HttpGet("ClientScript")]
     [AllowAnonymous]
-    [AiPopupEndpoint]
     public ActionResult ClientScript()
     {
         // The injected <script> tag is unversioned, so tell browsers to revalidate;
@@ -167,10 +171,13 @@ public class AiSearchController : ControllerBase
         return stream is null ? NotFound() : File(stream, "application/javascript; charset=utf-8");
     }
 
-    /// <summary>Lightweight status endpoint so the client knows whether AI search is usable.</summary>
+    /// <summary>
+    /// Lightweight status endpoint so the client knows which of its features
+    /// apply: the AI popup (hidden in native-search-only mode) and labelling
+    /// meaning matches in Jellyfin's own search results.
+    /// </summary>
     [HttpGet("Health")]
     [Authorize(AuthenticationSchemes = "CustomAuthentication")]
-    [AiPopupEndpoint]
     public ActionResult Health()
     {
         var c = Config;
@@ -178,10 +185,24 @@ public class AiSearchController : ControllerBase
         {
             enabled = c.Enabled,
             configured = Configured(c),
+            popup = !c.NativeSearchOnly,
+            markMatches = c.Enabled && c.SemanticSearchEnabled && c.MarkSemanticMatches,
             mode = IsRemoteRetrieval ? "remote" : "local",
             model = c.Model,
             maxResults = c.MaxResults
         });
+    }
+
+    /// <summary>
+    /// Loads a cold retrieval backend ahead of the user's query. The client
+    /// calls it when the search page or the AI popup opens; it returns at once
+    /// and does nothing when the backend was used in the last few minutes.
+    /// </summary>
+    [HttpPost("Warmup")]
+    [Authorize(AuthenticationSchemes = "CustomAuthentication")]
+    public ActionResult Warmup()
+    {
+        return Ok(new { started = _warmer.Touch(Config) });
     }
 
     /// <summary>Proxies the model-alias list for the admin config dropdown (admin only; only the config page calls this).</summary>
@@ -365,82 +386,54 @@ public class AiSearchController : ControllerBase
                    string.Equals(e.Prompt, historyPrompt, StringComparison.Ordinal))?.Id
                ?? Guid.NewGuid().ToString("N"));
 
-        // One unified flow for both retrieval modes: a single pass over the user's
-        // library view gathers the watch-filtered pool plus taste signals (captures
-        // the untyped `user` so we never name the Jellyfin user-entity type across
-        // versions). `movies` holds the scope's items, movies, or TV series + episodes.
+        // Retrieval first: the semantic paths only need the user's view of the
+        // few dozen ids they return, not the whole library. Loading every item
+        // of the scope with its user data (thousands of rows once episodes are
+        // indexed) is left to the paths that actually pick from the full pool:
+        // surprise mode and the catalog fallback.
         var scopeKinds = isTv
             ? new[] { BaseItemKind.Series, BaseItemKind.Episode }
             : new[] { BaseItemKind.Movie };
-        var movies = _libraryManager.GetItemList(new InternalItemsQuery(user)
-        {
-            IncludeItemTypes = scopeKinds,
-            Recursive = true,
-            IsVirtualItem = false
-        });
 
-        var pool = new List<BaseItem>();
-        var watched = new List<string>();
-        var favorites = new List<string>();
-        var playedById = new Dictionary<Guid, bool>(movies.Count);
-        foreach (var item in movies)
-        {
-            if (string.IsNullOrWhiteSpace(item.Name))
-            {
-                continue;
-            }
-
-            var ud = _userDataManager.GetUserData(user, item);
-            var played = ud?.Played ?? false;
-            playedById.TryAdd(item.Id, played);
-            if (personalize && (ud?.IsFavorite ?? false) && favorites.Count < 60)
-            {
-                favorites.Add(TitleYear(item));
-            }
-
-            if (personalize && played && watched.Count < 80)
-            {
-                watched.Add(TitleYear(item));
-            }
-
-            if ((includeWatched || !played) && !exclude.Contains(item.Id))
-            {
-                pool.Add(item);
-            }
-        }
-
-        if (pool.Count == 0)
-        {
-            pool.AddRange(movies.Where(m => !string.IsNullOrWhiteSpace(m.Name) && !exclude.Contains(m.Id)));
-        }
-
-        // Surprise mode skips the semantic index (there is no query to match)
-        // and hands the model a broad random slice to pick delightful picks from.
-        // For TV scope, restrict to series, surprising the user with a single
-        // episode rather than a show to watch isn't the point of the feature.
-        List<BaseItem>? candidates;
-        bool usedSemantic;
-        if (isSurprise)
-        {
-            var surprisePool = isTv ? pool.Where(item => item is Series).ToList() : pool;
-            if (isTv && surprisePool.Count == 0)
-            {
-                surprisePool = movies.Where(item => item is Series && !exclude.Contains(item.Id)).ToList();
-            }
-
-            candidates = CandidateSelector.Select(surprisePool, "random", Math.Max(10, c.MaxCatalogItems));
-            usedSemantic = false;
-        }
-        else
+        List<BaseItem>? candidates = null;
+        var usedSemantic = false;
+        if (!isSurprise)
         {
             // Retrieval source: a remote search endpoint, or the local semantic
             // index. Either returns candidate items; both fall back to a catalog
             // slice when unavailable (not configured, or the call/embedding fails).
             candidates = IsRemoteRetrieval
-                ? await RemoteSearchAsync(c, modelPrompt, movies, playedById, includeWatched, exclude, isTv, userId, user.Username, cancellationToken).ConfigureAwait(false)
-                : await SemanticCandidatesAsync(c, modelPrompt, movies, playedById, includeWatched, exclude, isTv, cancellationToken).ConfigureAwait(false);
+                ? await RemoteSearchAsync(c, modelPrompt, user, scopeKinds, includeWatched, exclude, isTv, userId, user.Username, cancellationToken).ConfigureAwait(false)
+                : await SemanticCandidatesAsync(c, modelPrompt, user, scopeKinds, includeWatched, exclude, isTv, cancellationToken).ConfigureAwait(false);
             usedSemantic = candidates is not null;
-            candidates ??= CandidateSelector.Select(pool, c.SelectionStrategy, Math.Max(10, c.MaxCatalogItems));
+            if (usedSemantic)
+            {
+                _warmer.MarkUsed();
+            }
+        }
+
+        LibraryView? view = null;
+        if (candidates is null)
+        {
+            view = LoadLibraryView(user, scopeKinds, includeWatched, exclude, personalize);
+            if (isSurprise)
+            {
+                // Surprise mode skips the semantic index (there is no query to
+                // match) and hands the model a broad random slice. For TV scope,
+                // restrict to series: surprising the user with a single episode
+                // rather than a show to watch isn't the point of the feature.
+                var surprisePool = isTv ? view.Pool.Where(item => item is Series).ToList() : view.Pool;
+                if (isTv && surprisePool.Count == 0)
+                {
+                    surprisePool = view.All.Where(item => item is Series && !exclude.Contains(item.Id)).ToList();
+                }
+
+                candidates = CandidateSelector.Select(surprisePool, "random", Math.Max(10, c.MaxCatalogItems));
+            }
+            else
+            {
+                candidates = CandidateSelector.Select(view.Pool, c.SelectionStrategy, Math.Max(10, c.MaxCatalogItems));
+            }
         }
 
         // Model disabled: return the retrieval matches directly, ranked as
@@ -457,6 +450,23 @@ public class AiSearchController : ControllerBase
                 item,
                 usedSemantic ? CastFormatter.Format(_libraryManager.GetPeople(item)) : string.Empty))
             .ToList();
+
+        // Taste signals: already gathered by the full pass when one ran,
+        // otherwise two small, capped queries.
+        var favorites = new List<string>();
+        var watched = new List<string>();
+        if (personalize)
+        {
+            if (view is not null)
+            {
+                favorites = view.Favorites;
+                watched = view.Watched;
+            }
+            else
+            {
+                (favorites, watched) = LoadTasteSignals(user, scopeKinds);
+            }
+        }
 
         // Distilled taste summary (silent): fed into the prompt when personalizing,
         // and lazily (re)built in the background as the user's taste drifts.
@@ -514,12 +524,142 @@ public class AiSearchController : ControllerBase
         });
     }
 
+    // One pass over the user's whole view of the scope: the watch-filtered
+    // pool the catalog fallback and surprise mode pick from, plus taste
+    // signals. Only those paths need it; semantic retrieval does not.
+    private LibraryView LoadLibraryView(Jellyfin.Database.Implementations.Entities.User user, BaseItemKind[] scopeKinds, bool includeWatched, HashSet<Guid> exclude, bool personalize)
+    {
+        var all = _libraryManager.GetItemList(new InternalItemsQuery(user)
+        {
+            IncludeItemTypes = scopeKinds,
+            Recursive = true,
+            IsVirtualItem = false
+        });
+
+        var view = new LibraryView(all);
+        foreach (var item in all)
+        {
+            if (string.IsNullOrWhiteSpace(item.Name))
+            {
+                continue;
+            }
+
+            var ud = _userDataManager.GetUserData(user, item);
+            var played = ud?.Played ?? false;
+            if (personalize && (ud?.IsFavorite ?? false) && view.Favorites.Count < 60)
+            {
+                view.Favorites.Add(TitleYear(item));
+            }
+
+            if (personalize && played && view.Watched.Count < 80)
+            {
+                view.Watched.Add(TitleYear(item));
+            }
+
+            if ((includeWatched || !played) && !exclude.Contains(item.Id))
+            {
+                view.Pool.Add(item);
+            }
+        }
+
+        if (view.Pool.Count == 0)
+        {
+            view.Pool.AddRange(all.Where(m => !string.IsNullOrWhiteSpace(m.Name) && !exclude.Contains(m.Id)));
+        }
+
+        return view;
+    }
+
+    // Favorites and the most recently watched titles, for the prompt, without
+    // walking the whole library: the database filters and caps both lists.
+    private (List<string> Favorites, List<string> Watched) LoadTasteSignals(Jellyfin.Database.Implementations.Entities.User user, BaseItemKind[] scopeKinds)
+    {
+        var favorites = _libraryManager.GetItemList(new InternalItemsQuery(user)
+        {
+            IncludeItemTypes = scopeKinds,
+            Recursive = true,
+            IsVirtualItem = false,
+            IsFavorite = true,
+            Limit = 60,
+            DtoOptions = new DtoOptions(false)
+        });
+        var watched = _libraryManager.GetItemList(new InternalItemsQuery(user)
+        {
+            IncludeItemTypes = scopeKinds,
+            Recursive = true,
+            IsVirtualItem = false,
+            IsPlayed = true,
+            Limit = 80,
+            OrderBy = new[] { (ItemSortBy.DatePlayed, SortOrder.Descending) },
+            DtoOptions = new DtoOptions(false)
+        });
+
+        return (
+            favorites.Where(i => !string.IsNullOrWhiteSpace(i.Name)).Select(TitleYear).ToList(),
+            watched.Where(i => !string.IsNullOrWhiteSpace(i.Name)).Select(TitleYear).ToList());
+    }
+
+    // Maps ranked ids back to items the user may see, in rank order, applying
+    // the exclude list and (unless asked otherwise) dropping watched titles.
+    // Loading by id skips the library-access part of the user's query, so each
+    // item is visibility-checked on its own as well.
+    private List<BaseItem>? PickVisible(
+        IEnumerable<Guid> rankedIds,
+        Jellyfin.Database.Implementations.Entities.User user,
+        BaseItemKind[] scopeKinds,
+        bool includeWatched,
+        HashSet<Guid> exclude,
+        int maxRetrieve)
+    {
+        var ids = rankedIds.Where(id => !exclude.Contains(id)).Distinct().ToArray();
+        if (ids.Length == 0)
+        {
+            return null;
+        }
+
+        var items = _libraryManager.GetItemList(new InternalItemsQuery(user)
+        {
+            ItemIds = ids,
+            IncludeItemTypes = scopeKinds,
+            Recursive = true,
+            IsVirtualItem = false
+        });
+
+        var byId = new Dictionary<Guid, BaseItem>(items.Count);
+        foreach (var item in items)
+        {
+            byId.TryAdd(item.Id, item);
+        }
+
+        var picked = new List<BaseItem>(maxRetrieve);
+        foreach (var id in ids)
+        {
+            if (!byId.TryGetValue(id, out var item) || string.IsNullOrWhiteSpace(item.Name) || !item.IsVisibleStandalone(user))
+            {
+                continue;
+            }
+
+            if (!includeWatched && (_userDataManager.GetUserData(user, item)?.Played ?? false))
+            {
+                continue;
+            }
+
+            picked.Add(item);
+            if (picked.Count >= maxRetrieve)
+            {
+                break;
+            }
+        }
+
+        return picked.Count > 0 ? picked : null;
+    }
+
     // --- Direct mode: semantic retrieval over the plugin's own index. ---
     private async Task<List<BaseItem>?> SemanticCandidatesAsync(
         PluginConfiguration c,
         string prompt,
-        IReadOnlyList<BaseItem> movies,
-        Dictionary<Guid, bool> playedById,
+        Jellyfin.Database.Implementations.Entities.User user,
+        BaseItemKind[] scopeKinds,
         bool includeWatched,
         HashSet<Guid> exclude,
         bool isTv,
@@ -537,26 +677,25 @@ public class AiSearchController : ControllerBase
 
             // If the query names a series we hold, disambiguate within that
             // series' episodes instead of across the whole library.
-            var series = DetectSeries(prompt, movies);
+            var series = DetectSeries(prompt, _libraryManager.GetItemList(new InternalItemsQuery(user)
+            {
+                IncludeItemTypes = new[] { BaseItemKind.Series },
+                Recursive = true,
+                DtoOptions = new DtoOptions(false)
+            }));
             if (series is not null)
             {
-                allowedIds = new HashSet<Guid>();
-                foreach (var item in movies)
+                allowedIds = new HashSet<Guid>(_libraryManager.GetItemIds(new InternalItemsQuery(user)
                 {
-                    if ((item is Episode ep && ep.SeriesId == series.Id) || item.Id == series.Id)
-                    {
-                        allowedIds.Add(item.Id);
-                    }
-                }
-
-                if (allowedIds.Count == 0)
+                    AncestorIds = new[] { series.Id },
+                    IncludeItemTypes = new[] { BaseItemKind.Episode },
+                    Recursive = true,
+                    IsVirtualItem = false
+                }))
                 {
-                    allowedIds = null; // nothing embedded for it; fall back to global
-                }
-                else
-                {
-                    take = System.Math.Max(maxRetrieve, allowedIds.Count);
-                }
+                    series.Id
+                };
+                take = Math.Max(maxRetrieve, allowedIds.Count);
             }
         }
 
@@ -566,58 +705,25 @@ public class AiSearchController : ControllerBase
             return null;
         }
 
-        // The index is library-wide; intersecting with the user's own item
-        // list enforces per-user visibility.
-        var byId = new Dictionary<Guid, BaseItem>(movies.Count);
-        foreach (var item in movies)
-        {
-            byId.TryAdd(item.Id, item);
-        }
-
-        var picked = new List<BaseItem>(maxRetrieve);
-        foreach (var id in ids)
-        {
-            if (!byId.TryGetValue(id, out var item))
-            {
-                continue;
-            }
-
-            if (exclude.Contains(id))
-            {
-                continue;
-            }
-
-            if (!includeWatched && playedById.TryGetValue(id, out var played) && played)
-            {
-                continue;
-            }
-
-            picked.Add(item);
-            if (picked.Count >= maxRetrieve)
-            {
-                break;
-            }
-        }
-
-        return picked.Count > 0 ? picked : null;
+        return PickVisible(ids, user, scopeKinds, includeWatched, exclude, maxRetrieve);
     }
 
     // Finds the library series whose name appears verbatim (case-insensitive) in
     // the query, preferring the longest such name so "Star Trek: TNG" beats
     // "Star Trek". Returns null when the query names no held series.
-    private static BaseItem? DetectSeries(string prompt, IReadOnlyList<BaseItem> movies)
+    private static BaseItem? DetectSeries(string prompt, IReadOnlyList<BaseItem> seriesList)
     {
         var q = prompt.ToLowerInvariant();
         BaseItem? best = null;
         var bestLen = 0;
-        foreach (var item in movies)
+        foreach (var item in seriesList)
         {
             if (item is not Series || string.IsNullOrWhiteSpace(item.Name) || item.Name.Length < 3)
             {
                 continue;
             }
 
-            if (item.Name.Length > bestLen && q.Contains(item.Name.ToLowerInvariant(), System.StringComparison.Ordinal))
+            if (item.Name.Length > bestLen && q.Contains(item.Name.ToLowerInvariant(), StringComparison.Ordinal))
             {
                 best = item;
                 bestLen = item.Name.Length;
@@ -634,8 +740,8 @@ public class AiSearchController : ControllerBase
     private async Task<List<BaseItem>?> RemoteSearchAsync(
         PluginConfiguration c,
         string prompt,
-        IReadOnlyList<BaseItem> movies,
-        Dictionary<Guid, bool> playedById,
+        Jellyfin.Database.Implementations.Entities.User user,
+        BaseItemKind[] scopeKinds,
         bool includeWatched,
         HashSet<Guid> exclude,
         bool isTv,
@@ -664,41 +770,9 @@ public class AiSearchController : ControllerBase
             _logger.LogWarning("AiSearch: search endpoint call failed: {Error}", response.Error);
         }
 
-        var ranked = response.Results;
-        if (ranked is null)
-        {
-            return null;
-        }
-
-        // Intersect with the user's own item list (visibility) and apply the same
-        // exclude/watched filtering the local path uses.
-        var byId = new Dictionary<Guid, BaseItem>(movies.Count);
-        foreach (var item in movies)
-        {
-            byId.TryAdd(item.Id, item);
-        }
-
-        var picked = new List<BaseItem>(maxRetrieve);
-        foreach (var (id, _) in ranked)
-        {
-            if (!byId.TryGetValue(id, out var item) || exclude.Contains(id))
-            {
-                continue;
-            }
-
-            if (!includeWatched && playedById.TryGetValue(id, out var played) && played)
-            {
-                continue;
-            }
-
-            picked.Add(item);
-            if (picked.Count >= maxRetrieve)
-            {
-                break;
-            }
-        }
-
-        return picked.Count > 0 ? picked : null;
+        return response.Results is null
+            ? null
+            : PickVisible(response.Results.Select(r => r.ItemId), user, scopeKinds, includeWatched, exclude, maxRetrieve);
     }
 
     // Model disabled: the retrieved candidates, already ranked by relevance, are
@@ -1194,6 +1268,20 @@ public class AiSearchController : ControllerBase
 
     private static string TitleYear(BaseItem item) =>
         item.ProductionYear is > 0 ? item.Name + " (" + item.ProductionYear + ")" : item.Name;
+
+    // The user's view of a scope, loaded only by the paths that need it.
+    private sealed class LibraryView
+    {
+        public LibraryView(IReadOnlyList<BaseItem> all) => All = all;
+
+        public IReadOnlyList<BaseItem> All { get; }
+
+        public List<BaseItem> Pool { get; } = new();
+
+        public List<string> Favorites { get; } = new();
+
+        public List<string> Watched { get; } = new();
+    }
 
     // Episodes read better as "Series, S02E05, Title" than a bare episode name.
     private static string? DisplayTitle(BaseItem item) =>
