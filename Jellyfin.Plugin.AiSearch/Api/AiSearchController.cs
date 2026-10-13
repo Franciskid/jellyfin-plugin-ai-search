@@ -173,8 +173,8 @@ public class AiSearchController : ControllerBase
 
     /// <summary>
     /// Lightweight status endpoint so the client knows which of its features
-    /// apply: the AI popup (hidden in native-search-only mode) and labelling
-    /// meaning matches in Jellyfin's own search results.
+    /// apply: the AI popup (hidden in native-search-only mode) and the AI
+    /// Search row on Jellyfin's search page.
     /// </summary>
     [HttpGet("Health")]
     [Authorize(AuthenticationSchemes = "CustomAuthentication")]
@@ -186,7 +186,8 @@ public class AiSearchController : ControllerBase
             enabled = c.Enabled,
             configured = Configured(c),
             popup = !c.NativeSearchOnly,
-            markMatches = c.Enabled && c.SemanticSearchEnabled && c.MarkSemanticMatches,
+            aiRow = c.Enabled && c.SemanticSearchEnabled && c.ShowAiSearchRow,
+            explain = c.ExplainAiMatches && c.UseModel && !string.IsNullOrWhiteSpace(c.ChatEndpointUrl),
             mode = IsRemoteRetrieval ? "remote" : "local",
             model = c.Model,
             maxResults = c.MaxResults

@@ -224,19 +224,33 @@
                     <input is="emby-input" type="number" id="SemanticSearchMaxResults" label="Max meaning-based matches per search" min="1" max="100" />
                 </div>
                 <div class="inputContainer">
-                    <input is="emby-input" type="number" id="SemanticSearchTimeoutMs" label="Longest wait for meaning-based matches (ms)" min="250" max="10000" step="250" />
+                    <input is="emby-input" type="number" id="SemanticSearchTimeoutMs" label="Longest wait for meaning-based matches in other apps (ms)" min="250" max="10000" step="250" />
                     <div class="fieldDescription">
-                        Jellyfin shows search results only once every source has answered, so this caps how much a slow
-                        embedding or search backend can delay a search. A slower call still finishes in the background and
+                        For apps other than the web client's AI Search row: Jellyfin shows search results only once every
+                        source has answered, so this caps how much a slow embedding or search backend can delay a search. A slower call still finishes in the background and
                         is reused by the next search.
                     </div>
                 </div>
                 <div class="checkboxContainer checkboxContainer-withDescription">
                     <label>
-                        <input is="emby-checkbox" type="checkbox" id="MarkSemanticMatches" />
-                        <span>Label meaning-based matches in search results</span>
+                        <input is="emby-checkbox" type="checkbox" id="ShowAiSearchRow" />
+                        <span>Show meaning-based matches in their own "AI Search" row (web client)</span>
                     </label>
-                    <div class="fieldDescription">Adds an "AI" tag to results that only the meaning-based search found, so they can be told apart from title matches.</div>
+                    <div class="fieldDescription">
+                        The row appears under Jellyfin's results and loads on its own, so title results never wait for it.
+                        One-word searches that already match titles do not show it. Other apps (TV, mobile) get the matches
+                        mixed into Jellyfin's results instead.
+                    </div>
+                </div>
+                <div class="checkboxContainer checkboxContainer-withDescription">
+                    <label>
+                        <input is="emby-checkbox" type="checkbox" id="ExplainAiMatches" />
+                        <span>Explain each AI Search result with the language model</span>
+                    </label>
+                    <div class="fieldDescription">
+                        Once a search settles, asks the chat model above for a one-line reason per result. Without it, each
+                        result shows which of your words it matched, and a synopsis excerpt.
+                    </div>
                 </div>
                 <div class="checkboxContainer checkboxContainer-withDescription">
                     <label>
@@ -245,7 +259,7 @@
                     </label>
                     <div class="fieldDescription">
                         Hides the AI search bar and its popup entirely, and turns off its endpoints. Jellyfin's own
-                        search still gets meaning-based matches from the option above (and their labels, if on).
+                        search still gets meaning-based matches from the option above (and the AI Search row, if on).
                     </div>
                 </div>
 
@@ -375,7 +389,8 @@
                     page.querySelector('#SemanticSearchMinWords').value = cfg.SemanticSearchMinWords;
                     page.querySelector('#SemanticSearchMaxResults').value = cfg.SemanticSearchMaxResults;
                     page.querySelector('#SemanticSearchTimeoutMs').value = cfg.SemanticSearchTimeoutMs || 2000;
-                    page.querySelector('#MarkSemanticMatches').checked = cfg.MarkSemanticMatches !== false;
+                    page.querySelector('#ShowAiSearchRow').checked = cfg.ShowAiSearchRow !== false;
+                    page.querySelector('#ExplainAiMatches').checked = cfg.ExplainAiMatches !== false;
                     page.querySelector('#NativeSearchOnly').checked = cfg.NativeSearchOnly === true;
                     page.querySelector('#LogSearches').checked = cfg.LogSearches === true;
                     page.querySelector('#SearchLogRetentionDays').value = cfg.SearchLogRetentionDays;
@@ -452,7 +467,8 @@
                     cfg.SemanticSearchMinWords = parseInt(page.querySelector('#SemanticSearchMinWords').value, 10) || 3;
                     cfg.SemanticSearchMaxResults = parseInt(page.querySelector('#SemanticSearchMaxResults').value, 10) || 20;
                     cfg.SemanticSearchTimeoutMs = parseInt(page.querySelector('#SemanticSearchTimeoutMs').value, 10) || 2000;
-                    cfg.MarkSemanticMatches = page.querySelector('#MarkSemanticMatches').checked;
+                    cfg.ShowAiSearchRow = page.querySelector('#ShowAiSearchRow').checked;
+                    cfg.ExplainAiMatches = page.querySelector('#ExplainAiMatches').checked;
                     cfg.NativeSearchOnly = page.querySelector('#NativeSearchOnly').checked;
                     cfg.LogSearches = page.querySelector('#LogSearches').checked;
                     cfg.SearchLogRetentionDays = parseInt(page.querySelector('#SearchLogRetentionDays').value, 10) || 7;

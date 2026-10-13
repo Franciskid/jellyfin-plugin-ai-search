@@ -60,9 +60,12 @@
             q3: 'Seen it already?',
             q3opts: [['unseen', 'Something new'], ['rewatch', 'Can rewatch a favorite']],
             go: 'Find it',
-            originBadge: 'AI',
-            originTitle: 'Found by AI Search from the meaning of your search, not by its title',
-            originLegend: 'found by AI Search from the meaning of your search. Everything else comes from Jellyfin\'s title search.'
+            rowTitle: 'AI Search',
+            rowSub: function (q) { return 'related to \u201c' + q + '\u201d by meaning, not by title'; },
+            rowLoading: 'Looking for titles related by meaning',
+            typeMovie: 'Movie',
+            typeSeries: 'Series',
+            typeEpisode: 'Episode'
         },
         fr: {
             fabTitle: 'Recherche IA',
@@ -108,9 +111,12 @@
             q3: 'Déjà vu ?',
             q3opts: [['unseen', 'Du nouveau'], ['rewatch', 'Un favori à revoir']],
             go: 'Trouver',
-            originBadge: 'IA',
-            originTitle: 'Trouvé par la recherche IA à partir du sens de votre recherche, pas par son titre',
-            originLegend: 'trouvé par la recherche IA à partir du sens de votre recherche. Le reste vient de la recherche par titre de Jellyfin.'
+            rowTitle: 'Recherche IA',
+            rowSub: function (q) { return 'liés à \u00ab\u00a0' + q + '\u00a0\u00bb par le sens, pas par le titre'; },
+            rowLoading: 'Recherche de titres liés par le sens',
+            typeMovie: 'Film',
+            typeSeries: 'Série',
+            typeEpisode: 'Épisode'
         }
     };
 
@@ -405,14 +411,26 @@
     '@keyframes ais-spin{to{transform:rotate(360deg)}}' +
     '@media (max-width:640px){.ais-helptxt{display:none}.ais-help{padding:0 9px}}' +
 
-    // Labels on meaning matches inside Jellyfin's own search results.
-    '.ais-origin{position:absolute;top:6px;left:6px;z-index:3;display:inline-flex;align-items:center;gap:3px;' +
-      'padding:2px 6px 2px 4px;font-size:11px;font-weight:700;letter-spacing:.03em;line-height:16px;color:#fff;' +
-      'background:' + ACCENT + ';box-shadow:0 1px 4px rgba(0,0,0,.55);pointer-events:auto;cursor:help}' +
-    '.ais-origin .ais-ic{width:12px;height:12px}' +
-    '.card.ais-ai-match .cardScalable,.card.ais-ai-match .cardImageContainer{outline:2px solid ' + ACCENT + ';outline-offset:-2px}' +
-    '.ais-legend{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 4px;padding:0 3.3%;font-size:13px;color:#aeb4bd}' +
-    '.ais-legend .ais-origin{position:static;box-shadow:none;cursor:default}' +
+    // The AI Search row under Jellyfin's own search results.
+    '.ais-row{display:block;width:100%;clear:both;margin:4px 0 18px}' +
+    '.ais-row .sectionTitle{margin-top:.6em}' +
+    '.ais-rowtitle{display:flex;align-items:center;gap:8px;flex-wrap:wrap}' +
+    '.ais-rowtitle .ais-ic{width:18px;height:18px;color:' + ACCENT + '}' +
+    '.ais-rowsub{font-size:13px;font-weight:400;color:#8f969f;letter-spacing:0}' +
+    '.ais-rscroll{display:flex;gap:16px;overflow-x:auto;overscroll-behavior-x:contain;padding:6px 3.3% 14px;scrollbar-width:thin}' +
+    '.ais-rcard{flex:none;width:150px;cursor:pointer;color:inherit}' +
+    '.ais-rcard.wide{width:252px}' +
+    '.ais-rimg{position:relative;width:100%;aspect-ratio:2/3;background:#20242b center/cover no-repeat;' +
+      'box-shadow:0 0 0 1px rgba(255,255,255,.07);transition:box-shadow .15s,transform .15s}' +
+    '.ais-rcard.wide .ais-rimg{aspect-ratio:16/9}' +
+    '.ais-rcard:hover .ais-rimg,.ais-rcard:focus .ais-rimg{transform:translateY(-3px);box-shadow:0 0 0 2px ' + ACCENT + '}' +
+    '.ais-rname{font-size:13px;font-weight:600;margin-top:8px;line-height:1.3;color:#eef1f4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    '.ais-rmeta{font-size:11.5px;color:#7d848e;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    '.ais-rwhy{display:flex;gap:5px;align-items:flex-start;font-size:12px;line-height:1.38;color:#84d6f2;margin-top:6px}' +
+    '.ais-rwhy .ais-ic{width:12px;height:12px;flex:none;margin-top:2px}' +
+    '.ais-rwhy span{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}' +
+    '.ais-rsnip{font-size:11.5px;line-height:1.4;color:#8f969f;margin-top:4px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}' +
+    '.ais-rloading{display:flex;align-items:center;gap:10px;padding:6px 3.3% 14px;font-size:13px;color:#8f969f}' +
     '@media (prefers-reduced-motion:reduce){.ais-panel,.ais-inputwrap{animation:none!important}.ais-spin{animation-duration:1.2s}}';
 
     function injectStyles() {
@@ -996,9 +1014,10 @@
             .then(function (h) {
                 usable = !!(h && h.enabled && h.configured);
                 popupEnabled = !h || h.popup !== false;
-                origin.enabled = !!(h && h.markMatches);
+                aiRow.enabled = !!(h && h.aiRow);
+                aiRow.explain = !!(h && h.explain);
                 updateLauncher();
-                origin.schedule();
+                aiRow.refresh();
             })
             .catch(function () { /* keep last known state */ });
     }
@@ -1021,153 +1040,239 @@
         return /^#!?\/search(\?|$)/i.test(window.location.hash || '');
     }
 
-    // ------------------------------------------------- native search labels ---
+    // ----------------------------------------------------- AI Search row ---
 
-    // Jellyfin's search results mix title matches with the plugin's meaning
-    // matches. The server lists the ids only the meaning match found in an
-    // X-AiSearch-Matches response header; this records them per search term
-    // and labels those cards, so the user can tell where each result came from.
-    var origin = (function () {
-        var byTerm = {};
+    // Jellyfin answers a search only once every search provider has, so
+    // meaning matches merged into its results would hold back the title
+    // matches. Instead, the web client marks its search requests (the server
+    // then leaves them alone) and this script shows the meaning matches in a
+    // row of their own under Jellyfin's results, fetched separately, each with
+    // a short reason. A one-word search that already matches titles is a title
+    // search, so it gets no row.
+    var aiRow = (function () {
+        var state = { enabled: false, explain: false };
+        var cache = {};        // term -> { status: 'pending'|'done', items, explained }
         var pending = false;
-        var state = { enabled: false };
+        var timer = null;
+        var lastTerm = null;
 
-        function normTerm(term) { return String(term || '').trim().toLowerCase(); }
-        function normId(id) { return String(id || '').replace(/-/g, '').toLowerCase(); }
+        function words(term) { return String(term || '').trim().split(/\s+/).filter(Boolean).length; }
 
-        function searchTermOf(url) {
-            if (!url || !/searchterm=/i.test(url) || !/\/(items|search\/hints)(\?|$)/i.test(url.split('#')[0].replace(/\?.*$/, '') + '?')) { return null; }
-            var m = /[?&]searchTerm=([^&#]*)/i.exec(url);
+        function isSearchUrl(url) {
+            if (!url || !/searchterm=/i.test(url)) { return false; }
+            var path = String(url).split('#')[0].replace(/\?.*$/, '');
+            return /\/(items|search\/hints)$/i.test(path);
+        }
+
+        function hashParam(name) {
+            var hash = window.location.hash || '';
+            var q = hash.indexOf('?') >= 0 ? hash.slice(hash.indexOf('?') + 1) : '';
+            var m = new RegExp('(?:^|&)' + name + '=([^&]*)').exec(q);
             if (!m) { return null; }
             try { return decodeURIComponent(m[1].replace(/\+/g, ' ')); } catch (e) { return m[1]; }
         }
 
-        function capture(url, header) {
-            if (header === null || header === undefined) { return; }
-            var term = searchTermOf(url);
-            if (term === null) { return; }
-            var key = normTerm(term);
-            var set = byTerm[key] || (byTerm[key] = {});
-            String(header).split(',').forEach(function (id) { id = normId(id); if (id) { set[id] = true; } });
-            schedule();
-        }
-
         function currentTerm() {
-            var hash = window.location.hash || '';
-            var q = hash.indexOf('?') >= 0 ? hash.slice(hash.indexOf('?') + 1) : '';
-            var m = /(?:^|&)query=([^&]*)/.exec(q);
-            if (!m) { return null; }
-            try { return normTerm(decodeURIComponent(m[1].replace(/\+/g, ' '))); } catch (e) { return normTerm(m[1]); }
+            var q = hashParam('query');
+            return q === null ? null : q.trim();
         }
 
-        function badgeHtml() {
-            return IC.sparkle + esc(t().originBadge);
-        }
-
-        function apply() {
-            pending = false;
-            var page = document.getElementById('searchPage');
-            var active = state.enabled && isSearchPage() && page;
-            var set = active ? byTerm[currentTerm() || ''] : null;
-            var scope = page || document;
-            var cards = scope.querySelectorAll('.searchResults .card[data-id], .card.ais-ai-match');
-            var marked = 0;
-            for (var i = 0; i < cards.length; i++) {
-                var card = cards[i];
-                var isAi = !!(set && set[normId(card.getAttribute('data-id'))]);
-                var badge = card.querySelector('.ais-origin');
-                if (isAi) {
-                    marked++;
-                    card.classList.add('ais-ai-match');
-                    if (!badge) {
-                        var host = card.querySelector('.cardScalable') || card.querySelector('.cardBox') || card;
-                        if (getComputedStyle(host).position === 'static') { host.style.position = 'relative'; }
-                        badge = document.createElement('span');
-                        badge.className = 'ais-origin';
-                        badge.title = t().originTitle;
-                        badge.innerHTML = badgeHtml();
-                        host.appendChild(badge);
+        // Tell the server the web client shows meaning matches itself, so
+        // Jellyfin's title results are not held back by them.
+        function hookRequests() {
+            var proto = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
+            if (proto && !proto.__aisHooked) {
+                proto.__aisHooked = true;
+                var open = proto.open;
+                var send = proto.send;
+                proto.open = function (method, url) {
+                    this.__aisUrl = typeof url === 'string' ? url : String(url || '');
+                    return open.apply(this, arguments);
+                };
+                proto.send = function () {
+                    if (isSearchUrl(this.__aisUrl)) {
+                        try { this.setRequestHeader('X-AiSearch-Row', '1'); } catch (e) { /* ignore */ }
                     }
-                } else {
-                    card.classList.remove('ais-ai-match');
-                    if (badge && badge.parentNode) { badge.parentNode.removeChild(badge); }
-                }
+                    return send.apply(this, arguments);
+                };
             }
 
-            var results = page && page.querySelector('.searchResults');
-            var legend = page && page.querySelector('.ais-legend');
-            if (results && marked > 0) {
-                if (!legend || legend.parentNode !== results) {
-                    if (legend && legend.parentNode) { legend.parentNode.removeChild(legend); }
-                    legend = document.createElement('div');
-                    legend.className = 'ais-legend';
-                    legend.innerHTML = '<span class="ais-origin">' + badgeHtml() + '</span><span>' + esc(t().originLegend) + '</span>';
-                    results.insertBefore(legend, results.firstChild);
-                }
-            } else if (legend && legend.parentNode) {
-                legend.parentNode.removeChild(legend);
+            if (typeof window.fetch === 'function' && !window.fetch.__aisHooked) {
+                var original = window.fetch;
+                var wrapped = function (input, init) {
+                    var url = typeof input === 'string' ? input : (input && input.url) || '';
+                    if (isSearchUrl(url)) {
+                        try {
+                            init = Object.assign({}, init || {});
+                            var headers = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {});
+                            headers.set('X-AiSearch-Row', '1');
+                            init.headers = headers;
+                            return original.call(this, input, init);
+                        } catch (e) { /* fall through */ }
+                    }
+                    return original.apply(this, arguments);
+                };
+                wrapped.__aisHooked = true;
+                window.fetch = wrapped;
+            }
+        }
+
+        function load(term) {
+            var a = api();
+            if (!a || cache[term]) { schedule(); return; }
+            var entry = cache[term] = { status: 'pending', items: [] };
+            var url = 'AiSearch/Matches?term=' + encodeURIComponent(term) + '&locale=' + locale();
+            var parentId = hashParam('parentId');
+            if (parentId) { url += '&parentId=' + encodeURIComponent(parentId); }
+            schedule();
+            a.ajax({ type: 'GET', url: a.getUrl(url), dataType: 'json' })
+                .then(function (r) { entry.status = 'done'; entry.items = (r && r.items) || []; schedule(); })
+                .catch(function () { entry.status = 'done'; entry.items = []; schedule(); });
+        }
+
+        function explain(term) {
+            var entry = cache[term];
+            var a = api();
+            if (!state.explain || !a || !entry || entry.explained || !entry.items.length) { return; }
+            entry.explained = true;
+            a.ajax({
+                type: 'POST', url: a.getUrl('AiSearch/Explain'), dataType: 'json', contentType: 'application/json',
+                data: JSON.stringify({ term: term, locale: locale(), itemIds: entry.items.map(function (it) { return it.id; }) })
+            }).then(function (r) {
+                var reasons = (r && r.reasons) || {};
+                entry.items.forEach(function (it) { if (reasons[it.id]) { it.reason = reasons[it.id]; } });
+                schedule();
+            }).catch(function () { });
+        }
+
+        function typeLabel(type) {
+            var s = t();
+            return type === 'Episode' ? s.typeEpisode : type === 'Series' ? s.typeSeries : s.typeMovie;
+        }
+
+        function cardHtml(it) {
+            var wide = it.type === 'Episode';
+            var title = wide && it.seriesName ? it.seriesName : it.name;
+            var meta = [];
+            if (wide) {
+                var se = (it.seasonNumber != null ? 'S' + it.seasonNumber : '') + (it.episodeNumber != null ? 'E' + it.episodeNumber : '');
+                meta.push((se ? se + ' · ' : '') + it.name);
+            } else {
+                if (it.year) { meta.push(it.year); }
+                meta.push(typeLabel(it.type));
+            }
+            var why = it.reason || it.why || '';
+            var img = '';
+            try { img = api().getImageUrl(it.id, { type: 'Primary', maxHeight: wide ? 240 : 360, quality: 90 }); } catch (e) { /* no image */ }
+            return '<div class="ais-rcard' + (wide ? ' wide' : '') + '" data-id="' + esc(it.id) + '" tabindex="0" title="' + esc(title + (why ? '\n' + why : '')) + '">' +
+                '<div class="ais-rimg" style="background-image:url(\'' + esc(img) + '\')"></div>' +
+                '<div class="ais-rname">' + esc(title) + '</div>' +
+                '<div class="ais-rmeta">' + esc(meta.join(' · ')) + '</div>' +
+                (why ? '<div class="ais-rwhy">' + IC.sparkle + '<span>' + esc(why) + '</span></div>' : '') +
+                (!it.reason && it.snippet ? '<div class="ais-rsnip">' + esc(it.snippet) + '</div>' : '') +
+                '</div>';
+        }
+
+        function removeRow() {
+            var row = document.getElementById('ais-row');
+            if (row && row.parentNode) { row.parentNode.removeChild(row); }
+        }
+
+        function render() {
+            pending = false;
+            var page = document.getElementById('searchPage');
+            var term = currentTerm();
+            if (!state.enabled || !isSearchPage() || !page || !term) { removeRow(); return; }
+
+            // Jellyfin's own outcome: result rows, or its "no results" message.
+            var results = page.querySelector('.searchResults') || page.querySelector('.noItemsMessage');
+            var titleHits = page.querySelectorAll('.searchResults .card').length;
+            if (!results || (words(term) < 2 && titleHits > 0)) { removeRow(); return; }
+            var entry = cache[term];
+            if (!entry) {
+                // A one-word search is only sent once Jellyfin has shown it
+                // matches no title (multi-word searches start while typing).
+                if (term.length >= 2 && term === lastTerm && words(term) < 2) { load(term); }
+                removeRow();
+                return;
+            }
+            if (entry.status === 'done' && !entry.items.length) { removeRow(); return; }
+
+            var s = t();
+            var body = entry.status === 'pending'
+                ? '<div class="ais-rloading"><span class="ais-spin"></span>' + esc(s.rowLoading) + '</div>'
+                : '<div class="ais-rscroll">' + entry.items.map(cardHtml).join('') + '</div>';
+            var key = term + '|' + entry.status + '|' + entry.items.map(function (it) { return it.id + (it.reason ? '+' : ''); }).join(',');
+
+            var row = document.getElementById('ais-row');
+            if (!row) {
+                row = document.createElement('div');
+                row.id = 'ais-row';
+                row.className = 'ais-row';
+                row.addEventListener('click', function (e) {
+                    var card = e.target.closest && e.target.closest('.ais-rcard');
+                    if (card) { navigate(card.getAttribute('data-id')); }
+                });
+                row.addEventListener('keydown', function (e) {
+                    var card = e.target.closest && e.target.closest('.ais-rcard');
+                    if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); navigate(card.getAttribute('data-id')); }
+                });
+            }
+            if (row.getAttribute('data-key') !== key) {
+                var scroll = row.querySelector('.ais-rscroll');
+                var left = scroll && row.getAttribute('data-term') === term ? scroll.scrollLeft : 0;
+                row.innerHTML = '<h2 class="sectionTitle sectionTitle-cards padded-left padded-right ais-rowtitle">' + IC.sparkle +
+                    '<span>' + esc(s.rowTitle) + '</span><span class="ais-rowsub">' + esc(s.rowSub(term)) + '</span></h2>' + body;
+                row.setAttribute('data-key', key);
+                row.setAttribute('data-term', term);
+                var next = row.querySelector('.ais-rscroll');
+                if (next && left) { next.scrollLeft = left; }
+            }
+            if (row.previousElementSibling !== results) {
+                results.parentNode.insertBefore(row, results.nextSibling);
+            }
+
+            if (entry.status === 'done' && lastTerm === term && !entry.explainQueued) {
+                entry.explainQueued = true;
+                setTimeout(function () { if (currentTerm() === term) { explain(term); } else { entry.explainQueued = false; } }, 900);
             }
         }
 
         function schedule() {
             if (pending) { return; }
             pending = true;
-            (window.requestAnimationFrame || setTimeout)(apply);
+            (window.requestAnimationFrame || setTimeout)(render);
         }
 
-        function hookXhr() {
-            var proto = window.XMLHttpRequest && window.XMLHttpRequest.prototype;
-            if (!proto || proto.__aisHooked) { return; }
-            proto.__aisHooked = true;
-            var open = proto.open;
-            var send = proto.send;
-            proto.open = function (method, url) {
-                this.__aisUrl = typeof url === 'string' ? url : String(url || '');
-                return open.apply(this, arguments);
-            };
-            proto.send = function () {
-                var xhr = this;
-                if (searchTermOf(xhr.__aisUrl) !== null) {
-                    xhr.addEventListener('load', function () {
-                        try { capture(xhr.__aisUrl, xhr.getResponseHeader('X-AiSearch-Matches')); } catch (e) { /* ignore */ }
-                    });
-                }
-                return send.apply(this, arguments);
-            };
-        }
-
-        function hookFetch() {
-            if (typeof window.fetch !== 'function' || window.fetch.__aisHooked) { return; }
-            var original = window.fetch;
-            var wrapped = function (input) {
-                var url = typeof input === 'string' ? input : (input && input.url) || '';
-                var promise = original.apply(this, arguments);
-                if (searchTermOf(url) !== null) {
-                    promise.then(function (r) {
-                        try { capture(url, r.headers.get('X-AiSearch-Matches')); } catch (e) { /* ignore */ }
-                    }, function () { });
-                }
-                return promise;
-            };
-            wrapped.__aisHooked = true;
-            window.fetch = wrapped;
+        // Follow the search box (the web client keeps it in the URL), with a
+        // short pause so typing does not fire a request per keystroke.
+        function onTermChange() {
+            if (!state.enabled || !isSearchPage()) { schedule(); return; }
+            var term = currentTerm();
+            if (term === lastTerm) { schedule(); return; }
+            lastTerm = term;
+            clearTimeout(timer);
+            schedule();
+            if (term && term.length >= 2 && words(term) >= 2) {
+                timer = setTimeout(function () { if (currentTerm() === term) { load(term); } }, 400);
+            }
         }
 
         function start() {
-            hookXhr();
-            hookFetch();
+            hookRequests();
             new MutationObserver(function () { if (state.enabled && isSearchPage()) { schedule(); } })
                 .observe(document.body, { childList: true, subtree: true });
-            window.addEventListener('hashchange', schedule);
+            window.addEventListener('hashchange', onTermChange);
+            setInterval(onTermChange, 300);
         }
 
         state.start = start;
-        state.schedule = schedule;
+        state.refresh = onTermChange;
         return state;
     }());
 
     // Hook requests right away: the web client may search before it is ready.
-    origin.start();
+    aiRow.start();
 
     function onRoute() {
         updateLauncher();

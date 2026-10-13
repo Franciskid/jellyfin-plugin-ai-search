@@ -193,21 +193,32 @@ public class PluginConfiguration : BasePluginConfiguration
     public int SemanticSearchMaxResults { get; set; } = 20;
 
     /// <summary>
-    /// Gets or sets the longest a native search waits for semantic matches, in
-    /// milliseconds (clamped to 250-10000). Jellyfin shows nothing until every
-    /// search provider answers, so this caps what meaning matches can add to a
-    /// search. A slower backend call is not abandoned: it finishes in the
+    /// Gets or sets the longest a native search from a client other than the
+    /// web client's AI Search row waits for semantic matches, in milliseconds
+    /// (clamped to 250-10000). Jellyfin shows nothing until every search
+    /// provider answers, so this caps what meaning matches can add to a search. A slower backend call is not abandoned: it finishes in the
     /// background and its result is cached for the next keystroke.
     /// </summary>
     public int SemanticSearchTimeoutMs { get; set; } = 2000;
 
     /// <summary>
-    /// Gets or sets a value indicating whether meaning matches are labelled in
-    /// the web client's search results, so they can be told apart from
-    /// Jellyfin's own title matches. Needs the client script, so it keeps the
-    /// script loaded even when <see cref="NativeSearchOnly"/> hides the popup.
+    /// Gets or sets a value indicating whether the web client shows meaning
+    /// matches in their own "AI Search" row below Jellyfin's results, instead
+    /// of mixed into Jellyfin's rows. The row loads separately, so Jellyfin's
+    /// title results never wait for the retrieval backend. Needs the client
+    /// script, so it keeps the script loaded even when
+    /// <see cref="NativeSearchOnly"/> hides the popup. Other clients (TV and
+    /// mobile apps) always get the matches mixed in.
     /// </summary>
-    public bool MarkSemanticMatches { get; set; } = true;
+    public bool ShowAiSearchRow { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the language model writes a
+    /// one-line reason under each AI Search row result, once the search
+    /// settles. Without it (or without a chat model) the row shows which
+    /// words of the search the title matched, and a synopsis excerpt.
+    /// </summary>
+    public bool ExplainAiMatches { get; set; } = true;
 
     /// <summary>
     /// Gets or sets a value indicating whether the AI search popup (and its

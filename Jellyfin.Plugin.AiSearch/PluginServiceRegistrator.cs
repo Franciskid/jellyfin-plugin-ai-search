@@ -33,6 +33,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<IndexBuilder>();
         serviceCollection.AddSingleton<SemanticRetriever>();
         serviceCollection.AddSingleton<SemanticWarmer>();
+        serviceCollection.AddSingleton<SemanticMatcher>();
         serviceCollection.AddHostedService<IndexStartupService>();
 
         // Tells the web client which native search results came from the

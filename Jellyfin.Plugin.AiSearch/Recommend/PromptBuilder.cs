@@ -118,6 +118,61 @@ public static class PromptBuilder
     }
 
     /// <summary>
+    /// Builds the messages that ask the model why each meaning-based search
+    /// match relates to the search, one short line per title, for the AI
+    /// Search row. The reply uses the recommendation shape so the same
+    /// tolerant parser reads it.
+    /// </summary>
+    /// <param name="term">The search term.</param>
+    /// <param name="locale">"fr" or "en", the language for the reasons.</param>
+    /// <param name="items">The matched titles, in display order.</param>
+    /// <returns>The messages array for the completions payload.</returns>
+    public static object[] BuildExplainMessages(string term, string locale, IReadOnlyList<BaseItem> items)
+    {
+        var language = locale == "fr" ? "French" : "English";
+        var system =
+            "A user searched their personal Jellyfin library and a meaning-based search returned the titles below. " +
+            "For EVERY title, in order, write one short reason (at most 90 characters) saying concretely what links it " +
+            "to the search: a theme, setting, character, plot point or mood taken from the provided fields. " +
+            "Use ONLY the provided fields, not your memory. If the link is weak, say plainly what little they share. " +
+            "Do not repeat the title, do not start with \"This\" or \"Because\". Write in " + language + ". " +
+            "Respond with STRICT minified JSON only (no markdown, no prose) of exactly this shape: " +
+            "{\"answer\":\"\",\"recommendations\":[{\"index\":<integer>,\"reason\":\"<reason>\"}]}.";
+
+        var user = new StringBuilder();
+        user.Append("SEARCH: ").Append(term).Append('\n').Append("TITLES:\n");
+        for (var i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            user.Append('[').Append(i).Append("] ");
+            user.Append(item is Episode episode ? DocumentBuilder.EpisodeLabel(episode) : item.Name);
+            if (item.ProductionYear is > 0)
+            {
+                user.Append(" (").Append(item.ProductionYear).Append(')');
+            }
+
+            if (item.Genres is { Length: > 0 })
+            {
+                user.Append(" | genres: ").Append(string.Join(", ", item.Genres));
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.Overview))
+            {
+                var overview = item.Overview.Trim();
+                user.Append(" | synopsis: ").Append(overview.Length > 400 ? overview[..400] + "…" : overview);
+            }
+
+            user.Append('\n');
+        }
+
+        return new object[]
+        {
+            new { role = "system", content = system },
+            new { role = "user", content = user.ToString() },
+        };
+    }
+
+    /// <summary>
     /// Builds the messages that ask the model to distill a viewer's taste into a
     /// short profile from their favorites and most-watched titles. Kept silent
     /// server-side and fed back into future searches.

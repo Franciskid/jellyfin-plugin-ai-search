@@ -14,7 +14,7 @@ namespace Jellyfin.Plugin.AiSearch.Web;
 /// Adds the plugin's client script tag to the web client's index.html while
 /// Jellyfin serves it, so nothing on disk has to be writable. When the script
 /// has nothing to do (<see cref="Configuration.PluginConfiguration.NativeSearchOnly"/>
-/// hides the popup and meaning matches are not labelled), does the opposite:
+/// hides the popup and the AI Search row is off), does the opposite:
 /// strips any AiSearch script tag from the served page instead, whatever left
 /// it there (this middleware, the on-disk injector, or by hand).
 /// </summary>
@@ -97,12 +97,12 @@ public sealed class IndexHtmlScriptMiddleware
 
     /// <summary>
     /// Whether the web client needs the script: for the popup, or, with the
-    /// popup hidden, to label meaning matches in Jellyfin's own search.
+    /// popup hidden, for the AI Search row on Jellyfin's search page.
     /// </summary>
     /// <param name="config">The current plugin configuration.</param>
     /// <returns><c>true</c> when the script tag belongs in index.html.</returns>
     internal static bool ScriptWanted(Configuration.PluginConfiguration config) =>
-        !config.NativeSearchOnly || (config.SemanticSearchEnabled && config.MarkSemanticMatches);
+        !config.NativeSearchOnly || (config.SemanticSearchEnabled && config.ShowAiSearchRow);
 
     private static bool IsIndexHtmlRequest(string? path)
     {

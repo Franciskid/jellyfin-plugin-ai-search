@@ -2,12 +2,13 @@
 
 Describe what you want to watch, and the plugin searches your Jellyfin library for a match.
 It finds relevant titles, then asks a language model to pick the best ones and explain each choice.
-The same retrieval also plugs into Jellyfin's own search, so meaning-based matches show up
-alongside ordinary title matches without opening the AI search bar at all.
+The same retrieval also plugs into Jellyfin's own search: in the web client, meaning-based matches
+show up in their own "AI Search" row under the ordinary title matches, each with the reason it
+was found, without slowing those title matches down.
 
 `Jellyfin 12.0+` · `.NET 10` · `no database` · `any OpenAI-compatible endpoint` · `runs fully offline with Ollama`
 
-Version 1.2.0.0 requires Jellyfin 12.0 or newer. Jellyfin 10.11 servers keep getting version
+Versions 1.2.0.0 and later require Jellyfin 12.0 or newer. Jellyfin 10.11 servers keep getting version
 1.1.1.0 from the plugin catalog automatically; the repository's manifest lists both versions and
 Jellyfin picks the one that matches the running server.
 
@@ -93,7 +94,8 @@ current index.
 |---|---|
 | Index size | about 100 MB, one file |
 | Index scan | about 2 ms for 15000 entries × 768 dims (SIMD, one contiguous matrix) |
-| Jellyfin search with meaning matches | about 80-150 ms warm; a repeated or retyped search about 10-20 ms of that |
+| Jellyfin search in the web client | about 0.1-0.25 s, same as without the plugin (the AI row loads on its own) |
+| AI Search row | about 40-170 ms warm, model-written reasons about 3-4 s later |
 | AI popup without the model | about 0.1-0.3 s (the model call, when on, comes on top) |
 | First build, Ollama + bge-m3 on CPU | about 40 minutes |
 | First build, OpenAI `text-embedding-3-small` | a few minutes, about $0.05 |
@@ -122,12 +124,13 @@ Answers follow the web client language. French and English are detected and pass
 
 Since 1.2.0.0, the plugin also registers itself as one of Jellyfin's own search providers
 (`ISearchProvider`, internal, priority 50). It runs alongside Jellyfin's built-in title search
-(`SqlSearchProvider`) whenever you search from the web client's search page, or call
-`GET /Items?searchTerm=` or `GET /Search/Hints` directly. No AI popup involved: this works even
+(`SqlSearchProvider`) for searches from TV and mobile apps or direct `GET /Items?searchTerm=` and
+`GET /Search/Hints` calls; the web client's search page gets the same matches in a separate row
+instead (see [The AI Search row](#the-ai-search-row-web-client)). No AI popup involved: this works even
 with **Native search only** (below) turned on, and needs no language model, only a retrieval
 source (local index or remote service).
 
-How it merges with title search:
+How it merges with title search, for other apps:
 
 - The built-in provider scores an exact title match 100, a prefix match 80, a word-prefix match
   75, and a "contains" match 50.
@@ -148,11 +151,34 @@ Scoping and access control:
   standard visibility and parental-control rule (`BaseItem.IsVisibleStandalone`) before returning
   it. An API-key call with no user context skips that per-user check, same as Jellyfin's own
   providers do.
-- Jellyfin only answers a search once every provider has, so the plugin caps its own wait
-  ("Longest wait for meaning-based matches", 2 seconds by default). A slower backend call is not
-  dropped: it finishes in the background and its answer is cached, so the next keystroke gets it
-  instantly. On a timeout or any failure this plugin contributes no matches for that search; title
-  search is unaffected.
+- Jellyfin only answers a search once every provider has, so anything this plugin adds to the
+  merged results delays the title matches too. That is why the web client gets the meaning
+  matches separately (next section). Other apps (TV, mobile, API callers) get them merged in,
+  within a capped wait ("Longest wait for meaning-based matches in other apps", 2 seconds by
+  default). A slower backend call is not dropped: it finishes in the background and its answer is
+  cached for the next search. On a timeout or any failure this plugin contributes no matches;
+  title search is unaffected.
+
+### The AI Search row (web client)
+
+In the web client, meaning matches never touch Jellyfin's own search request. The client script
+marks its search requests with an `X-AiSearch-Row` header, the plugin's search provider steps
+aside for them, and Jellyfin's title results come back as fast as without the plugin. The script
+then asks the plugin for the meaning matches on its own (`GET /AiSearch/Matches`) and shows them
+in a separate **AI Search** row under Jellyfin's results, "related to ... by meaning, not by
+title":
+
+- Titles Jellyfin's title search already shows are left out of the row.
+- A one-word search that already matches titles (typing "kaame" while looking for Kaamelott) is a
+  title search: no row, and no backend call. One-word searches with no title match, and searches
+  of two words or more, get the row.
+- Each result says why it is there. Right away, the plugin cites the words of your search found
+  in the title, synopsis, genres, tags, cast, studio or series name (accent- and plural-tolerant),
+  with a synopsis excerpt; when nothing matches word for word (often the case across languages)
+  it says the match is by meaning. Once the search settles, if a chat model is configured, it
+  writes a one-line reason per title (`POST /AiSearch/Explain`, one call per settled search,
+  cached), which replaces the instant one.
+- Turn the row off to get the matches merged into Jellyfin's rows instead, like other apps.
 
 Speed:
 
@@ -162,17 +188,9 @@ Speed:
   to land on the first search of a session. The web client now asks the server to warm the backend
   up when the search page or the AI popup opens (`POST /AiSearch/Warmup`), so the model loads while
   you type. It does nothing if the backend was used in the last three minutes.
-
-Telling title matches and meaning matches apart:
-
-- Results that only this plugin found get an **AI** tag on their poster in the web client's search
-  page, with a one-line legend above the results. Anything without the tag came from Jellyfin's own
-  title search (an item both searches found counts as a title match).
-- The plugin tells the client which results those are with an `X-AiSearch-Matches` response header
-  on `/Items` and `/Search/Hints` (comma-separated item ids); the response body is left untouched,
-  so other clients are not affected. A `Server-Timing: aisearch;dur=...` entry shows how long the
-  plugin took, in the browser's network tab.
-- The search log records the same thing per result as `origin`: `title`, `semantic` or `both`.
+- For other apps, an `X-AiSearch-Matches` response header on `/Items` and `/Search/Hints` lists the
+  ids only the meaning search found, and a `Server-Timing: aisearch;dur=...` entry shows the time
+  the plugin took. The search log records each result's `origin`: `title`, `semantic` or `both`.
 
 Options (**Dashboard → Plugins → AI Search**, "4. Jellyfin search"):
 
@@ -182,8 +200,9 @@ Options (**Dashboard → Plugins → AI Search**, "4. Jellyfin search"):
 | Only for searches that look like a sentence | Off | Skips short keyword-style searches (see the minimum word count below), where meaning-based matches tend to be noisy. |
 | Minimum words to run | 3 | Used only when the option above is on. |
 | Max meaning-based matches per search | 20 | Upper bound on how many of this plugin's matches are added to one search. |
-| Longest wait for meaning-based matches (ms) | 2000 | 250-10000. Caps how long a search can wait on the backend; a slower call finishes in the background for the next search. |
-| Label meaning-based matches in search results | On | Adds the **AI** tag described above. |
+| Longest wait for meaning-based matches in other apps (ms) | 2000 | 250-10000. Caps how long a search from a TV/mobile app can wait on the backend; a slower call finishes in the background for the next search. |
+| Show meaning-based matches in their own "AI Search" row | On | The web client row described above. Off merges the matches into Jellyfin's rows. |
+| Explain each AI Search result with the language model | On | Needs the chat model from section 1. Off keeps the instant word-match reasons. |
 | Native search only | Off | See below. |
 
 ### Native search only
@@ -191,14 +210,15 @@ Options (**Dashboard → Plugins → AI Search**, "4. Jellyfin search"):
 Turning this on hides the AI search bar and popup entirely, leaving Jellyfin's own search (now
 with meaning-based matches, if enabled above) as the only search experience.
 
-- The client script stays loaded only to tag meaning matches (when that option is on); it shows no
-  button or popup. With labels off too, `index.html` is served without the script tag, a copy
+- The client script stays loaded only for the AI Search row (when that option is on); it shows no
+  button or popup. With the row off too, `index.html` is served without the script tag, a copy
   already present is stripped as the page is served, and the on-disk injected copy is removed at
   startup.
 - These endpoints, which only ever serve the popup, are refused with a bare 404: `Models`,
   `Recommend`, `Interview`, `History` (GET and DELETE), `Playlist`.
 - These stay reachable regardless of this option, since they serve the dashboard or native search:
-  `ClientScript`, `Health`, `Warmup`, `EmbeddingModels`, `IndexStatus`, `RebuildIndex`, `SearchLog`.
+  `ClientScript`, `Health`, `Warmup`, `Matches`, `Explain`, `EmbeddingModels`, `IndexStatus`,
+  `RebuildIndex`, `SearchLog`.
 
 ## Search log
 
@@ -366,8 +386,9 @@ when you need to cap usage per user centrally. The contract is at the bottom of 
 | Only for searches that look like a sentence | Off | Skips short keyword-style searches. |
 | Minimum words to run | 3 | Only checked when the option above is on. |
 | Max meaning-based matches per search | 20 | Upper bound per search. |
-| Longest wait for meaning-based matches (ms) | 2000 | How long a search may wait on the backend. |
-| Label meaning-based matches in search results | On | Tags results only the meaning search found. |
+| Longest wait for meaning-based matches in other apps (ms) | 2000 | How long a TV/mobile app search may wait on the backend. |
+| Show meaning-based matches in their own "AI Search" row | On | Web client row under Jellyfin's results. |
+| Explain each AI Search result with the language model | On | One-line reason per result, from the chat model. |
 | Native search only | Off | Hides the AI search bar/popup and its endpoints. |
 
 **Search log** (see [Search log](#search-log) above)
@@ -386,8 +407,10 @@ when you need to cap usage per user centrally. The contract is at the bottom of 
 | `GET /AiSearch/History` | Session | The caller's recent searches | Refused (404) |
 | `DELETE /AiSearch/History[/{id}]` | Session | Delete one search, or clear all | Refused (404) |
 | `POST /AiSearch/Playlist` | Session | Save a result set as a playlist | Refused (404) |
-| `GET /AiSearch/Health` | Session | Enabled, configured, popup and label state, for the client script | Reachable |
+| `GET /AiSearch/Health` | Session | Enabled, configured, popup and AI row state, for the client script | Reachable |
 | `POST /AiSearch/Warmup` | Session | Load a cold retrieval backend before the user's query | Reachable |
+| `GET /AiSearch/Matches?term=` | Session | Meaning matches for the AI Search row, with instant reasons (`parentId`, `locale` optional) | Reachable |
+| `POST /AiSearch/Explain` | Session | Model-written reason per matched title (`term`, `itemIds`, `locale`) | Reachable |
 | `GET /AiSearch/ClientScript` | none | The injected UI script. Contains no secrets. | Reachable |
 | `GET /AiSearch/Models` | Admin | Chat models, proxied from the models endpoint | Refused (404) |
 | `GET /AiSearch/EmbeddingModels` | Admin | Embedding models, for the config dropdown | Reachable |
