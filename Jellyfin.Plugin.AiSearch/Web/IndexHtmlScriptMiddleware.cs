@@ -85,6 +85,10 @@ public sealed class IndexHtmlScriptMiddleware
             bytes = ScriptWanted(Plugin.Instance!.Configuration)
                 ? AddScriptTag(context, bytes)
                 : StripScriptTag(context, bytes);
+
+            // The tag comes and goes with the plugin options, so a browser must
+            // check back instead of reusing a copy from before a change.
+            context.Response.Headers[HeaderNames.CacheControl] = "no-cache";
         }
 
         if (bytes.Length == 0)

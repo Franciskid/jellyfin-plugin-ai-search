@@ -169,9 +169,8 @@ in a separate **AI Search** row under Jellyfin's results, "related to ... by mea
 title":
 
 - Titles Jellyfin's title search already shows are left out of the row.
-- A one-word search that already matches titles (typing "kaame" while looking for Kaamelott) is a
-  title search: no row, and no backend call. One-word searches with no title match, and searches
-  of two words or more, get the row.
+- The row shows for every search with meaning matches, whether or not Jellyfin found titles; it
+  always sits below Jellyfin's own rows, so title matches stay first.
 - Each result says why it is there. Right away, the plugin cites the words of your search found
   in the title, synopsis, genres, tags, cast, studio or series name (accent- and plural-tolerant),
   with a synopsis excerpt; when nothing matches word for word (often the case across languages)
@@ -203,6 +202,7 @@ Options (**Dashboard → Plugins → AI Search**, "4. Jellyfin search"):
 | Longest wait for meaning-based matches in other apps (ms) | 2000 | 250-10000. Caps how long a search from a TV/mobile app can wait on the backend; a slower call finishes in the background for the next search. |
 | Show meaning-based matches in their own "AI Search" row | On | The web client row described above. Off merges the matches into Jellyfin's rows. |
 | Explain each AI Search result with the language model | On | Needs the chat model from section 1. Off keeps the instant word-match reasons. |
+| Language of the AI Search interface | Auto | Auto follows each user's Jellyfin display language, then the browser's. Français or English forces one for everybody, including the reasons the model writes. |
 | Native search only | Off | See below. |
 
 ### Native search only
@@ -389,6 +389,7 @@ when you need to cap usage per user centrally. The contract is at the bottom of 
 | Longest wait for meaning-based matches in other apps (ms) | 2000 | How long a TV/mobile app search may wait on the backend. |
 | Show meaning-based matches in their own "AI Search" row | On | Web client row under Jellyfin's results. |
 | Explain each AI Search result with the language model | On | One-line reason per result, from the chat model. |
+| Language of the AI Search interface | Auto | Auto (Jellyfin display language, then browser), Français or English. |
 | Native search only | Off | Hides the AI search bar/popup and its endpoints. |
 
 **Search log** (see [Search log](#search-log) above)

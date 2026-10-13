@@ -186,6 +186,7 @@ public class AiSearchController : ControllerBase
             enabled = c.Enabled,
             configured = Configured(c),
             popup = !c.NativeSearchOnly,
+            language = string.IsNullOrWhiteSpace(c.UiLanguage) ? "auto" : c.UiLanguage.Trim().ToLowerInvariant(),
             aiRow = c.Enabled && c.SemanticSearchEnabled && c.ShowAiSearchRow,
             explain = c.ExplainAiMatches && c.UseModel && !string.IsNullOrWhiteSpace(c.ChatEndpointUrl),
             mode = IsRemoteRetrieval ? "remote" : "local",
@@ -363,7 +364,7 @@ public class AiSearchController : ControllerBase
         }
 
         var maxResults = request.MaxResults is > 0 and <= 24 ? request.MaxResults.Value : c.MaxResults;
-        var locale = string.Equals(request.Locale, "fr", StringComparison.OrdinalIgnoreCase) ? "fr" : "en";
+        var locale = c.ResolveLocale(request.Locale);
         var includeWatched = request.IncludeWatched ?? c.IncludeWatched;
         var personalize = request.Personalize ?? true;
         var isTv = string.Equals(request.Scope, "tv", StringComparison.OrdinalIgnoreCase);
@@ -911,7 +912,7 @@ public class AiSearchController : ControllerBase
             return Unauthorized();
         }
 
-        var locale = string.Equals(request.Locale, "fr", StringComparison.OrdinalIgnoreCase) ? "fr" : "en";
+        var locale = c.ResolveLocale(request.Locale);
         var messages = PromptBuilder.BuildInterviewMessages(request.Prompt!.Trim(), locale);
         // Interview is a small request; an optional cheaper model can serve it (defaults to Model).
         var interviewModel = string.IsNullOrWhiteSpace(c.InterviewModel) ? c.Model : c.InterviewModel;

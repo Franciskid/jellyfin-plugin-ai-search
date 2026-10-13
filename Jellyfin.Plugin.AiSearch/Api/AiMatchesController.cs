@@ -101,7 +101,7 @@ public class AiMatchesController : ControllerBase
             return Unauthorized();
         }
 
-        var french = string.Equals(locale, "fr", StringComparison.OrdinalIgnoreCase);
+        var french = config.ResolveLocale(locale) == "fr";
         var take = Math.Clamp(config.SemanticSearchMaxResults, 1, 100);
         var stopwatch = Stopwatch.StartNew();
 
@@ -205,7 +205,7 @@ public class AiMatchesController : ControllerBase
         }
 
         var term = request.Term.Trim();
-        var locale = string.Equals(request.Locale, "fr", StringComparison.OrdinalIgnoreCase) ? "fr" : "en";
+        var locale = config.ResolveLocale(request.Locale);
         var model = string.IsNullOrWhiteSpace(config.InterviewModel) ? config.Model : config.InterviewModel;
         var key = string.Join('\n', model, locale, term, string.Join(',', items.Select(i => i.Id.ToString("N"))));
         try

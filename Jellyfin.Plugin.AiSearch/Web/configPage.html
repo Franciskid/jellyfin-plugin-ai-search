@@ -196,6 +196,15 @@
                     <input is="emby-input" type="number" id="TimeoutSeconds" label="Request timeout (seconds)" min="5" max="120" />
                 </div>
 
+                <div class="selectContainer">
+                    <select is="emby-select" id="UiLanguage" label="Language of the AI Search interface">
+                        <option value="auto">Auto (each user's Jellyfin display language, then the browser's)</option>
+                        <option value="fr">Français</option>
+                        <option value="en">English</option>
+                    </select>
+                    <div class="fieldDescription">Used by the AI search popup, the AI Search row and the reasons given for each result.</div>
+                </div>
+
                 <!-- 4. Jellyfin search -->
                 <div class="verticalSection">
                     <h3 class="sectionTitle">4. Jellyfin search</h3>
@@ -238,7 +247,7 @@
                     </label>
                     <div class="fieldDescription">
                         The row appears under Jellyfin's results and loads on its own, so title results never wait for it.
-                        One-word searches that already match titles do not show it. Other apps (TV, mobile) get the matches
+                        Other apps (TV, mobile) get the matches
                         mixed into Jellyfin's results instead.
                     </div>
                 </div>
@@ -390,6 +399,7 @@
                     page.querySelector('#SemanticSearchMaxResults').value = cfg.SemanticSearchMaxResults;
                     page.querySelector('#SemanticSearchTimeoutMs').value = cfg.SemanticSearchTimeoutMs || 2000;
                     page.querySelector('#ShowAiSearchRow').checked = cfg.ShowAiSearchRow !== false;
+                    page.querySelector('#UiLanguage').value = cfg.UiLanguage || 'auto';
                     page.querySelector('#ExplainAiMatches').checked = cfg.ExplainAiMatches !== false;
                     page.querySelector('#NativeSearchOnly').checked = cfg.NativeSearchOnly === true;
                     page.querySelector('#LogSearches').checked = cfg.LogSearches === true;
@@ -468,6 +478,7 @@
                     cfg.SemanticSearchMaxResults = parseInt(page.querySelector('#SemanticSearchMaxResults').value, 10) || 20;
                     cfg.SemanticSearchTimeoutMs = parseInt(page.querySelector('#SemanticSearchTimeoutMs').value, 10) || 2000;
                     cfg.ShowAiSearchRow = page.querySelector('#ShowAiSearchRow').checked;
+                    cfg.UiLanguage = page.querySelector('#UiLanguage').value || 'auto';
                     cfg.ExplainAiMatches = page.querySelector('#ExplainAiMatches').checked;
                     cfg.NativeSearchOnly = page.querySelector('#NativeSearchOnly').checked;
                     cfg.LogSearches = page.querySelector('#LogSearches').checked;

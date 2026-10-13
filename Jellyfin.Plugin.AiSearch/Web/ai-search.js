@@ -8,7 +8,14 @@
 
     // ---------------------------------------------------------------- i18n ---
 
+    // Set from the server's language option: 'fr' or 'en' force a language,
+    // anything else follows Jellyfin's display language (the web client puts
+    // it on <html lang>), then the browser's.
+    var forcedLanguage = null;
+
     function isFrench() {
+        if (forcedLanguage === 'fr') { return true; }
+        if (forcedLanguage === 'en') { return false; }
         var lang = (document.documentElement.getAttribute('lang')
             || (navigator && (navigator.language || navigator.userLanguage))
             || 'en');
@@ -412,8 +419,9 @@
     '@media (max-width:640px){.ais-helptxt{display:none}.ais-help{padding:0 9px}}' +
 
     // The AI Search row under Jellyfin's own search results.
-    '.ais-row{display:block;width:100%;clear:both;margin:4px 0 18px}' +
-    '.ais-row .sectionTitle{margin-top:.6em}' +
+    // Own class name: the popup's history list already uses .ais-row.
+    '.ais-airow{display:block;width:100%;clear:both;margin:4px 0 18px}' +
+    '.ais-airow .sectionTitle{margin-top:.6em}' +
     '.ais-rowtitle{display:flex;align-items:center;gap:8px;flex-wrap:wrap}' +
     '.ais-rowtitle .ais-ic{width:18px;height:18px;color:' + ACCENT + '}' +
     '.ais-rowsub{font-size:13px;font-weight:400;color:#8f969f;letter-spacing:0}' +
@@ -1014,6 +1022,7 @@
             .then(function (h) {
                 usable = !!(h && h.enabled && h.configured);
                 popupEnabled = !h || h.popup !== false;
+                forcedLanguage = h && (h.language === 'fr' || h.language === 'en') ? h.language : null;
                 aiRow.enabled = !!(h && h.aiRow);
                 aiRow.explain = !!(h && h.explain);
                 updateLauncher();
@@ -1047,16 +1056,13 @@
     // matches. Instead, the web client marks its search requests (the server
     // then leaves them alone) and this script shows the meaning matches in a
     // row of their own under Jellyfin's results, fetched separately, each with
-    // a short reason. A one-word search that already matches titles is a title
-    // search, so it gets no row.
+    // a short reason.
     var aiRow = (function () {
         var state = { enabled: false, explain: false };
         var cache = {};        // term -> { status: 'pending'|'done', items, explained }
         var pending = false;
         var timer = null;
         var lastTerm = null;
-
-        function words(term) { return String(term || '').trim().split(/\s+/).filter(Boolean).length; }
 
         function isSearchUrl(url) {
             if (!url || !/searchterm=/i.test(url)) { return false; }
@@ -1174,7 +1180,7 @@
         }
 
         function removeRow() {
-            var row = document.getElementById('ais-row');
+            var row = document.getElementById('ais-airow');
             if (row && row.parentNode) { row.parentNode.removeChild(row); }
         }
 
@@ -1186,16 +1192,8 @@
 
             // Jellyfin's own outcome: result rows, or its "no results" message.
             var results = page.querySelector('.searchResults') || page.querySelector('.noItemsMessage');
-            var titleHits = page.querySelectorAll('.searchResults .card').length;
-            if (!results || (words(term) < 2 && titleHits > 0)) { removeRow(); return; }
             var entry = cache[term];
-            if (!entry) {
-                // A one-word search is only sent once Jellyfin has shown it
-                // matches no title (multi-word searches start while typing).
-                if (term.length >= 2 && term === lastTerm && words(term) < 2) { load(term); }
-                removeRow();
-                return;
-            }
+            if (!results || !entry) { removeRow(); return; }
             if (entry.status === 'done' && !entry.items.length) { removeRow(); return; }
 
             var s = t();
@@ -1204,11 +1202,11 @@
                 : '<div class="ais-rscroll">' + entry.items.map(cardHtml).join('') + '</div>';
             var key = term + '|' + entry.status + '|' + entry.items.map(function (it) { return it.id + (it.reason ? '+' : ''); }).join(',');
 
-            var row = document.getElementById('ais-row');
+            var row = document.getElementById('ais-airow');
             if (!row) {
                 row = document.createElement('div');
-                row.id = 'ais-row';
-                row.className = 'ais-row';
+                row.id = 'ais-airow';
+                row.className = 'ais-airow';
                 row.addEventListener('click', function (e) {
                     var card = e.target.closest && e.target.closest('.ais-rcard');
                     if (card) { navigate(card.getAttribute('data-id')); }
@@ -1241,7 +1239,10 @@
         function schedule() {
             if (pending) { return; }
             pending = true;
-            (window.requestAnimationFrame || setTimeout)(render);
+            // Animation frames are paused in a background tab; a timer still
+            // runs, so the row is ready when the user switches back.
+            if (document.hidden || !window.requestAnimationFrame) { setTimeout(render, 50); }
+            else { window.requestAnimationFrame(render); }
         }
 
         // Follow the search box (the web client keeps it in the URL), with a
@@ -1253,7 +1254,7 @@
             lastTerm = term;
             clearTimeout(timer);
             schedule();
-            if (term && term.length >= 2 && words(term) >= 2) {
+            if (term && term.length >= 2) {
                 timer = setTimeout(function () { if (currentTerm() === term) { load(term); } }, 400);
             }
         }

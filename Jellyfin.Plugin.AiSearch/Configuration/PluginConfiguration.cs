@@ -26,6 +26,31 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets a value indicating whether the AI search feature is enabled.</summary>
     public bool Enabled { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets the language of the plugin's web interface (popup, AI
+    /// Search row) and of its explanations: <c>"auto"</c> follows each user's
+    /// Jellyfin display language, then the browser's; <c>"fr"</c> or
+    /// <c>"en"</c> force one for everybody.
+    /// </summary>
+    public string UiLanguage { get; set; } = "auto";
+
+    /// <summary>
+    /// Resolves the language for one request: the forced <see cref="UiLanguage"/>
+    /// when set, otherwise what the client asked for.
+    /// </summary>
+    /// <param name="requested">The client's locale ("fr", "en", or anything).</param>
+    /// <returns><c>"fr"</c> or <c>"en"</c>.</returns>
+    public string ResolveLocale(string? requested)
+    {
+        var forced = UiLanguage?.Trim().ToLowerInvariant();
+        if (forced is "fr" or "en")
+        {
+            return forced;
+        }
+
+        return requested is not null && requested.StartsWith("fr", System.StringComparison.OrdinalIgnoreCase) ? "fr" : "en";
+    }
+
     // 1. Language model (chat), always required
 
     /// <summary>
