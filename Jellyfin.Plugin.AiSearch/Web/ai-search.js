@@ -257,6 +257,7 @@
       'display:flex;align-items:center;justify-content:center;transition:border-color .15s,background .15s,transform .12s}' +
     '.ais-fab:hover{border-color:' + ACCENT + ';background:#191c21;transform:translateY(-1px)}' +
     '.ais-fab .ais-ic{width:22px;height:22px}' +
+    '.dashboardDocument .ais-fab {display: none;}' +
 
     '.ais-overlay{position:fixed;inset:0;z-index:1001;background:rgba(0,0,0,.58);overscroll-behavior:contain;' +
       'display:flex;align-items:flex-start;justify-content:center;padding:9vh 16px 24px}' +
