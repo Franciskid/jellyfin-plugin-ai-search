@@ -9,6 +9,14 @@
         "imageUrl": "",
         "versions": [
             {
+                "version": "1.3.0.2",
+                "changelog": "For Jellyfin 12.\n\n- Hide the floating AI search button in the administration dashboard so it no longer overlaps plugin configuration buttons. The button remains available elsewhere. Thanks @adripo for PR #5.",
+                "targetAbi": "12.0.0.0",
+                "sourceUrl": "https://github.com/Franciskid/jellyfin-plugin-ai-search/releases/download/v1.3.0.2/ai-search_1.3.0.2.zip",
+                "checksum": "7075f7d5b4beb31787a6a7d5ab56c7c6",
+                "timestamp": "2026-11-12T07:54:42Z"
+            },
+            {
                 "version": "1.3.0.1",
                 "changelog": "For Jellyfin 12. Fixes for the three open issues.\n\n- Newer OpenAI models work now. They refuse `max_tokens` and only accept the default temperature, so the plugin switches to `max_completion_tokens` and drops the temperature on its own, then remembers it for that model. You can also pick the field in the settings (\"Reply length limit field\"). Fixes #4.\n- You can exclude libraries from AI Search. Ticked libraries are left out of the index, the AI search popup and the AI matches in Jellyfin's search, but still show up in Jellyfin's normal title search. Fixes #3.\n- Building the index with a model that gives no embeddings (a reranker, or llama.cpp with `--pooling rank`) now stops with a clear message saying so, instead of a JSON error. If only a few titles fail, the build skips them and tells you how many. Fixes #2.",
                 "targetAbi": "12.0.0.0",
